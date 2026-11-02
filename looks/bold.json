@@ -1,0 +1,21 @@
+{
+ "about": "Bold: kinetic lowercase Inter Tight, butter-yellow punch words, neutral grade (references/looks.md).",
+ "grade": "contrast(1.07) saturate(.9) brightness(.97)",
+ "layers": [
+  {"background": "linear-gradient(180deg,rgba(20,55,75,.16),rgba(60,40,20,.08))", "blend": "soft-light"},
+  {"background": "radial-gradient(95% 62% at 50% 46%,rgba(0,0,0,0) 55%,rgba(0,0,0,.42) 100%)"},
+  {"background": "linear-gradient(180deg,rgba(0,0,0,.34) 0%,rgba(0,0,0,0) 22%,rgba(0,0,0,0) 52%,rgba(0,0,0,.42) 100%)"}
+ ],
+ "case": "lower",
+ "text": "#FFFFFF",
+ "shadow": "0 10px 40px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35)",
+ "classes": {
+  "sm": {"family": "Inter Tight", "weight": 800, "style": "normal", "size": 84, "lh": 86, "ls": -0.04},
+  "md": {"family": "Inter Tight", "weight": 900, "style": "normal", "size": 150, "lh": 140, "ls": -0.05},
+  "big": {"family": "Inter Tight", "weight": 900, "style": "normal", "size": 236, "lh": 214, "ls": -0.05}
+ },
+ "accent": {"color": "#FAE67A"},
+ "label": {"family": "Montserrat", "weight": 600, "color": "#F2EFE9"},
+ "cut_punch": 1.04,
+ "max_width": 860
+}

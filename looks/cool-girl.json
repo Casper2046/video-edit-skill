@@ -1,0 +1,21 @@
+{
+ "about": "Cool girl: warm faded grade, calm Inter lead-ins, Instrument Serif italic punch words (references/looks.md).",
+ "grade": "sepia(.18) saturate(.9) contrast(.93) brightness(1.05) hue-rotate(-5deg)",
+ "layers": [
+  {"background": "linear-gradient(180deg,rgba(255,226,200,.10),rgba(255,196,170,.16))", "blend": "soft-light"},
+  {"background": "radial-gradient(120% 70% at 50% 45%,rgba(255,255,255,0) 52%,rgba(60,35,25,.34) 100%)"},
+  {"background": "linear-gradient(180deg,rgba(60,35,25,.30) 0%,rgba(60,35,25,0) 30%,rgba(60,35,25,0) 66%,rgba(40,24,18,.45) 100%)"}
+ ],
+ "case": "lower",
+ "text": "#FFF8EF",
+ "shadow": "0 2px 26px rgba(60,30,20,.55)",
+ "classes": {
+  "sm": {"family": "Inter", "weight": 500, "style": "normal", "size": 64, "lh": 76, "ls": -0.016},
+  "md": {"family": "Instrument Serif", "weight": 400, "style": "italic", "size": 150, "lh": 138, "ls": 0},
+  "big": {"family": "Instrument Serif", "weight": 400, "style": "italic", "size": 200, "lh": 184, "ls": 0}
+ },
+ "accent": {"color": "#FAE67A"},
+ "label": {"family": "Inter", "weight": 600, "color": "#FFF8EF"},
+ "cut_punch": 1.03,
+ "max_width": 860
+}

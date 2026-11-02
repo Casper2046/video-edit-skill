@@ -8,6 +8,13 @@
 
 Check it, do not eyeball it: `PY build.py --safe` draws the unsafe area in red (see `SAFE_GUIDE` in the template), snapshot 10-20 moments with it on, fix, then build WITHOUT it for the render (grep the html for `rgba(255,0,0,.28)` -> must be 0).
 
+## Other platforms (spec mode, `PLATFORMS` in scripts/build_reel.py)
+| Platform | Top | Bottom (nothing below) | Left | Right | Button column | Source |
+|---|---|---|---|---|---|---|
+| Reels | 220 | 450 (y1470) | 35 | 35 | right 100 from y1155 | as above |
+| TikTok | 240 | 660 (y1260) | 120 | 120 | nothing right of x780 from y840 | vendor readings (adchecklab, Socialync, yosefk.me) of TikTok's downloadable In-Feed template; TikTok publishes no pixel values on its pages, and the column width was measured by a vendor |
+| Shorts | 288 | 672 (y1248) | 48 | 192 | none | Google Ads help 9128498, vertical video safe-zone diagram |
+
 ## Where things go
 - Lead-in caption lines: centred, chest band (y ~950-1300), in front of the speaker. Fine to sit over the body; never over the face (eyes to chin).
 - Punch words: behind the head near the top, or big over the chest.

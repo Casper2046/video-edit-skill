@@ -1,0 +1,34 @@
+{
+ "slug": "example-ep01",
+ "look": "bold",
+ "platform": "reels",
+ "names": "",
+ "shots": [
+  {"file": "shots/shot1.mp4",
+   "narration": "Feeling stuck on a busy day? Here is a two minute reset. Try it with me.",
+   "caption_top": 1050},
+  {"file": "shots/shot2.mp4",
+   "narration": "Breathe in slowly. Name three things you can see. Now pick one small task.",
+   "caption_top": 1050}
+ ],
+ "sentences": [
+  {"id": "hook", "hold": 0},
+  {"id": "promise", "hold": 0},
+  {"id": "try", "hold": 0.15, "chunks": [[2, "sm"], [2, "md y"]]},
+  {"id": "breathe", "hold": 0.6},
+  {"id": "see", "hold": 0.6},
+  {"id": "task", "hold": 0.3}
+ ],
+ "cards": {
+  "steps": [
+   {"from": "breathe", "to": "breathe", "text": "1  breathe"},
+   {"from": "see", "to": "see", "text": "2  look"},
+   {"from": "task", "to": "task", "text": "3  one task"}
+  ],
+  "chips": [
+   {"until": "end", "items": [{"sentence": "see", "word": "three", "text": "3 things"}]}
+  ],
+  "message": {"from": "task", "until": "end", "label": "example", "text": "Reply to one email.", "top": 790},
+  "end": {"lines": [["breathe · look ·", "sm"], ["one task", "md y"]], "top": 1020, "hold": 1.2}
+ }
+}
