@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Cut the reel straight from the originals into <project>/assets/aroll.mp4 (1080x1920, clean 30fps CFR from t=0).
 
-Usage:  PY assemble.py <project_dir>      (PY = the skill's Python, see SKILL.md; any Python 3 works for this one)
+Usage:  PY assemble.py <project_dir> [--end-hold SECONDS]     (PY = the skill's Python, see SKILL.md; any Python 3 works)
+--end-hold freezes the last frame (with silence) for that long after the last segment, room for an end card.
 Needs <project>/sources.json (from ingest.py) and <project>/edl.json:
   [{"id": "hook", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "Everybody's..."}, ...]
   zoom > 1 = punch-in cropped from the original (sharp when the source is 4K), centred on (cx, cy) as frame fractions.
@@ -44,6 +45,8 @@ def frames(f):
 def main():
     skillenv.utf8_stdio()
     proj = skillenv.path_arg(sys.argv[1])
+    hold = float(sys.argv[sys.argv.index('--end-hold') + 1]) if '--end-hold' in sys.argv else 0.0
+    pad_v, pad_a = (f',tpad=stop_mode=clone:stop_duration={hold:.3f}', f',apad=pad_dur={hold:.3f}') if hold > 0 else ('', '')
     work, assets = os.path.join(proj, 'work'), os.path.join(proj, 'assets')
     with open(os.path.join(proj, 'sources.json'), encoding='utf-8') as fh:
         src = json.load(fh)
@@ -73,7 +76,7 @@ def main():
     with open(concat, 'w', encoding='utf-8', newline='\n') as fh:
         fh.write(''.join(skillenv.concat_entry(os.path.basename(p)) for p in parts))
     subprocess.run([FF, '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', concat,
-                    '-vf', 'setpts=N/30/TB', '-r', '30', '-fps_mode', 'cfr', '-af', 'asetpts=PTS-STARTPTS',
+                    '-vf', 'setpts=N/30/TB' + pad_v, '-r', '30', '-fps_mode', 'cfr', '-af', 'asetpts=PTS-STARTPTS' + pad_a,
                     '-c:v', 'libx264', '-crf', '14', '-preset', 'medium', '-g', '30', '-keyint_min', '30', '-pix_fmt', 'yuv420p',
                     '-c:a', 'aac', '-b:a', '192k', aroll], check=True)
     fr = 0
@@ -86,7 +89,8 @@ def main():
     for m in meta:
         print(f"frame {m['frame']:4d} ({m['frame'] / 30:6.3f}s) +{m['frames']:3d}f  {m['id']:8s} {m['clip']} {m['in']}-{m['out']}  {m.get('line', '')}")
     total = frames(aroll)
-    print(f'total frames {fr} (aroll.mp4 has {total})' + ('' if total == fr else '  << MISMATCH, investigate'))
+    want = fr + round(hold * 30)
+    print(f'total frames {fr} + end hold {want - fr} (aroll.mp4 has {total})' + ('' if total == want else '  << MISMATCH, investigate'))
 
 
 if __name__ == '__main__':

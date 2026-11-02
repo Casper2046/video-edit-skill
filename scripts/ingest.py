@@ -3,11 +3,13 @@
 
 Usage (run with PY, the skill's Python from .platform.json; it has faster-whisper):
   PY ingest.py <project_dir> <clip files or one folder> [--newest N]
+  PY ingest.py <project_dir> --keep-order <shot files...>     (spec mode: c1..cN in the order given)
 
 Writes into <project_dir>:
   sources.json             {"c1": "/abs/original.MP4", ...}  (ordered oldest -> newest by file time)
   work/sheet_cN.jpg        8 frames across each clip; work/sheets.jpg stacks them (look at it: setups, angles)
-  words_cN.json            word timestamps per clip (small.en)
+  words_cN.json            word timestamps per clip (small.en), clip-start onset taken from the silence map
+  silences_cN.json         [[start, end], ...] silences (silencedetect -38dB d=0.35)
   transcript.txt           per-clip segment transcript + speech regions (silencedetect) for picking takes
 Originals are never modified. Everything is read straight from them (no proxies).
 """
@@ -20,6 +22,7 @@ from faster_whisper import WhisperModel
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
+from edl_from_words import onset_fix  # noqa: E402
 
 FF, FP = skillenv.tool('ffmpeg'), skillenv.tool('ffprobe')
 VIDEO_EXT = ('.mp4', '.mov', '.m4v')
@@ -33,18 +36,23 @@ def probe(f):
     return s['width'], s['height'], s['r_frame_rate'], float(j['format']['duration'])
 
 
-def speech_regions(f):
+def silence_marks(f):
     out = subprocess.run([FF, '-hide_banner', '-i', f, '-af', 'silencedetect=n=-38dB:d=0.35', '-f', 'null', '-'],
                          **skillenv.TEXT).stderr
-    marks = [(l.split('silence_')[1].split(':')[0], float(l.split(': ')[1].split(' ')[0]))
-             for l in out.splitlines() if 'silence_start' in l or 'silence_end' in l]
-    return ' '.join(f"{k[0].upper()}{v:.2f}" for k, v in marks)   # S=silence start, E=silence end
+    return [(l.split('silence_')[1].split(':')[0], float(l.split(': ')[1].split(' ')[0]))
+            for l in out.splitlines() if 'silence_start' in l or 'silence_end' in l]
+
+
+def silences(marks, duration):
+    """[[start, end], ...]; a silence still running at the end of the clip ends at the clip's duration"""
+    return [[v, marks[i + 1][1] if i + 1 < len(marks) else duration] for i, (k, v) in enumerate(marks) if k == 'start']
 
 
 def main():
     skillenv.utf8_stdio()
     proj, args = skillenv.path_arg(sys.argv[1]), sys.argv[2:]
-    newest = None
+    newest, keep = None, '--keep-order' in args
+    args = [a for a in args if a != '--keep-order']
     if '--newest' in args:
         i = args.index('--newest'); newest = int(args[i + 1]); args = args[:i] + args[i + 2:]
     files = []
@@ -53,7 +61,7 @@ def main():
             files += [os.path.join(a, f) for f in os.listdir(a) if f.lower().endswith(VIDEO_EXT)]
         else:
             files.append(a)
-    files = sorted(set(os.path.abspath(f) for f in files), key=os.path.getmtime)
+    files = [os.path.abspath(f) for f in files] if keep else sorted(set(os.path.abspath(f) for f in files), key=os.path.getmtime)
     if newest:
         files = files[-newest:]
     work = os.path.join(proj, 'work')
@@ -90,10 +98,15 @@ def main():
                 if words and t[:1] in '-.' and len(t) > 1 and t[1:2].isdigit():   # "GPT" "-6" / "5" ".1"
                     words[-1]['text'] += t; words[-1]['end'] = round(w.end, 3); continue
                 words.append({'text': t, 'start': round(w.start, 3), 'end': round(w.end, 3)})
+        marks = silence_marks(f)
+        sil = silences(marks, probe(f)[3])
+        words = onset_fix(words, sil)
         with open(os.path.join(proj, f'words_{cid}.json'), 'w', encoding='utf-8') as fh:
             json.dump(words, fh, indent=1)
+        with open(os.path.join(proj, f'silences_{cid}.json'), 'w', encoding='utf-8') as fh:
+            json.dump(sil, fh)
         lines.append('words: ' + ' '.join(f"{w['text']}@{w['start']:.2f}" for w in words))
-        lines.append('speech map: ' + speech_regions(f))
+        lines.append('speech map: ' + ' '.join(f"{k[0].upper()}{v:.2f}" for k, v in marks))   # S=silence start, E=silence end
     with open(os.path.join(proj, 'transcript.txt'), 'w', encoding='utf-8') as fh:   # utf-8: Whisper emits curly quotes, notes
         fh.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

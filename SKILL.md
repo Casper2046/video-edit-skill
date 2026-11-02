@@ -82,6 +82,32 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
 - One command per call. No `&&`, no `VAR=1 command`, no `~` inside arguments, no `source`, no `zsh`.
 - `ffmpeg` and `ffprobe` are on PATH on every OS (setup checks it), so one-off ffmpeg commands are the same everywhere.
 
+## Spec mode (generated shots + a reel spec, no hand edits)
+
+For shots that already say their script (AI-generated talking shots, one narration per shot), skip take picking and
+the hand-adapted template: describe the reel once in a **reel spec** and run one command. Start from
+`examples/reel.example.json`:
+- `shots[]`: `file`, `narration` (the caption truth: words, spelling, quotes), `caption_top` (y just below the chin).
+- `sentences[]` (optional, one per narration sentence, in order): `id` (for cards), `hold` (seconds kept after the line
+  for an exercise beat), `chunks` (`[[word count, "sm" | "md" | "big" + " y" for the accent], ...]`; without it a
+  default chunker runs).
+- `cards`: `steps[]` {from, to, text}; `chips[]` {until, items[] {sentence, word | offset, nth, text, accent}};
+  `message` {from, until, label, text, top}; `end` {lines[[text, class]], top, hold}. `until: "end"` = end-card start.
+- `look`: a pack in `looks/` (`bold`, `cool-girl`). `platform`: `reels`, `tiktok` or `shorts` (safe zones in layout.md).
+
+```bash
+PY SK/scripts/make_reel.py <reel.json> --out <project>                      # all stages
+PY SK/scripts/make_reel.py <reel.json> --out <project> --from build --look cool-girl --platform tiktok
+```
+Stages: ingest (small.en per shot, onset-corrected) -> edl (one segment per sentence) -> assemble (+ end-card hold)
+-> transcribe (medium.en on the cut: caption timing) -> build (index.html, layout.json, build-report.json) -> render
+-> check (cut sheet, phone copy, caption sheet, `reel_check.py`: caption onset vs silencedetect, cuts, safe zone,
+expected text; exit 1 on failure). Outputs land in `<project>/renders/<slug>-<look>-<platform>*`. A spec mistake
+(chunk count, unknown sentence id, a chip word that is not said) stops the build with the sentence named.
+Read `build-report.json` warnings: a caption block that had to move up to fit the platform may cover the chin.
+Spec mode does not use the cutout (no behind-head words yet); shots need headroom (head top below y400) first.
+Tests: `PY SK/tests/test_spec_mode.py`.
+
 ## Hard rules
 1. Everything inside the Reels safe zone: top 220, bottom 450 (nothing below y 1470), sides 35, right 100 from y 1155.
 2. Never cover the face with text or cards. Behind-head words show at least ~70% of each letter.
