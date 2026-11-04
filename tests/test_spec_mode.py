@@ -13,7 +13,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 import build_reel as B  # noqa: E402
 import edl_from_words as E  # noqa: E402
+import faces as F  # noqa: E402
 import reel_check as Q  # noqa: E402
+import make_reel as M  # noqa: E402
 
 NARR = ["Hello there, friend. 'Take five' and breathe slowly now.", 'Look up. Spot a grey, a bird.']
 
@@ -65,6 +67,56 @@ class Planner(unittest.TestCase):
         self.assertEqual([w['start'] for w in out], [.46, .8])
         self.assertEqual(E.onset_fix([{'text': 'x', 'start': .3, 'end': .6}], [[0, .46]])[0]['start'], .3)   # not a clip-start word
 
+    def snap(self, speech, soft=(), noise=0, clean_from=None):
+        import array
+        import random
+        sr = 16000
+        rnd = random.Random(3)
+        pcm = array.array('h', [int(rnd.uniform(-noise, noise)) for _ in range(sr * 3)])
+        for amp, spans in ((5000, speech), (50, soft)):         # soft: a weak /s/ or /h/ just above the room noise
+            for a, b in spans:
+                pcm[int(a * sr):int(b * sr)] = array.array('h', [amp if k % 9 < 4 else -amp for k in range(int(b * sr) - int(a * sr))])
+        sp = {'shots': [{'file': 'a.mp4', 'narration': 'Hello there. Look up.'}]}
+        if clean_from is not None:
+            sp['shots'][0]['clean_from'] = clean_from
+        ws = [{'text': 'Hello', 'start': .5, 'end': .7}, {'text': 'there.', 'start': .75, 'end': .9},   # Whisper: ends .1 early,
+              {'text': 'Look', 'start': 1.3, 'end': 1.8}, {'text': 'up.', 'start': 1.85, 'end': 1.95}]  # starts .35 early
+        return E.plan(sp, {'c1': ws}, {'c1': []}, {'c1': 3.0}, audio={'c1': (pcm.tobytes(), sr)})
+
+    def test_cuts_land_in_the_pause_not_inside_a_word(self):
+        a, b = self.snap([(.5, 1.0), (1.65, 2.2)])
+        self.assertTrue(1.06 <= a['out'] <= 1.59 and 1.06 <= b['in'] <= 1.59, (a['out'], b['in']))
+        self.assertGreaterEqual(b['out'], 2.26)
+
+    def test_a_shots_first_sentence_keeps_its_first_word_despite_a_pause_inside_the_sentence(self):
+        # a test run: a sentence with a comma pause was cut after the pause and lost its first word
+        a, _ = self.snap([(.5, .85), (1.1, 1.3), (1.65, 2.2)])      # Hello there, | (pause .25s) ... | Look up.
+        self.assertTrue(.38 <= a['in'] <= .46, a['in'])
+
+    def test_a_soft_start_or_end_is_still_sound_not_pause(self):
+        # a test run: a soft /s/ began 70ms before the level the planner called speech
+        a, b = self.snap([(.5, 1.0), (1.65, 2.2)], soft=[(1.0, 1.08), (1.55, 1.65)], noise=30)
+        self.assertGreaterEqual(a['out'], 1.08 + .05)
+        self.assertLessEqual(b['in'], 1.55 - .05)
+
+    def test_a_shot_opening_on_unclean_frames_starts_at_its_first_clean_frame_when_no_speech_is_lost(self):
+        # a test shot opened on a blurred foreground object (frames 0-17) that the cut kept
+        a, _ = self.snap([(.5, 1.0), (1.65, 2.2)], clean_from=.45)
+        self.assertEqual(a['in'], .45)
+        self.assertNotIn('opening', a)
+        a, b = self.snap([(.5, 1.0), (1.65, 2.2)], clean_from=1.4)        # a later sentence never moves
+        self.assertTrue(.38 <= a['in'] <= .46 and b['in'] < 1.6, (a['in'], b['in']))
+
+    def test_an_unclean_opening_stays_when_moving_the_in_point_would_cut_speech(self):
+        a, _ = self.snap([(.5, 1.0), (1.65, 2.2)], clean_from=.48)        # the first word starts at .50
+        self.assertTrue(.38 <= a['in'] <= .46, a['in'])
+        self.assertRegex(a['opening'], r'unclean until 0\.48s kept: the first word starts at 0\.(49|5\d)s')
+
+    def test_sentences_with_no_room_for_a_cut_join_seamlessly(self):
+        a, b = self.snap([(.5, 1.0), (1.04, 1.6)])
+        self.assertEqual(a['out'], b['in'])
+        self.assertTrue(1.0 <= b['in'] <= 1.04, b['in'])
+
     def test_plan_cuts_one_segment_per_sentence_with_holds_and_caps(self):
         _, words, _, edl, _, _ = inputs()
         self.assertEqual([e['id'] for e in edl], ['hi', 'relax', 'up', 'notice'])
@@ -100,7 +152,7 @@ class Builder(unittest.TestCase):
         text = Q.screen_text(page)
         self.assertIn('take five and breathe slowly now', text)
         self.assertIn("'take five'", page)
-        self.assertEqual(rep['warnings'], [])
+        self.assertEqual([w for w in rep['warnings'] if not w.startswith('up: caption shown only')], [])   # 'up' is 0.57s
         self.assertTrue(all(B.inside(B.PLATFORMS['reels'], e['box']) for e in layout))
 
     def test_caption_times_prefer_the_cut_transcript_inside_the_segment(self):
@@ -112,6 +164,33 @@ class Builder(unittest.TestCase):
         far = [{'text': 'Take', 'start': T1 + 30, 'end': T1 + 31}]               # outside the segment: ignored
         page, _, _ = B.build(sp, B.load_look('bold'), 'reels', segs, words, far, dur)
         self.assertNotAlmostEqual(Q.reveal_times(page)[1], T1 + 29.95, places=1)
+
+    def test_first_caption_of_a_sentence_follows_the_measured_speech_onset(self):
+        # Whisper hangs a pause on the next word (a test run: word at 4.77, speech at 5.22): the onset wins
+        sp, words, _, _, segs, dur = inputs()
+        T1 = segs[1]['frame'] / 30
+        cut = [{'text': 'Take', 'start': T1 + .10, 'end': T1 + .5}]
+        onset_src = segs[1]['src_in'] + .60
+        page, _, _ = B.build(sp, B.load_look('bold'), 'reels', segs, words, cut, dur, onsets={1: onset_src})
+        self.assertAlmostEqual(Q.reveal_times(page)[1], T1 + .55, places=2)     # onset .60 - .05 lead
+        page, _, _ = B.build(sp, B.load_look('bold'), 'reels', segs, words, cut, dur, onsets={})
+        self.assertAlmostEqual(Q.reveal_times(page)[1], T1 + .05, places=2)     # no onset measured: the cut word
+
+    def test_every_caption_chunk_is_fully_visible_long_enough_to_read(self):
+        # a test run: a last word said just before the cut showed at full opacity for 0.095s. Later chunks of a
+        # sentence come in early enough for 0.30s at full opacity; the first chunk stays on the speech onset.
+        sp, words, _, _, segs, dur = inputs()
+        page, _, rep = B.build(sp, B.load_look('bold'), 'reels', segs, words, [], dur)
+        holds = {c: round(v, 3) for c, v in Q.chunk_holds(page, dur).items()}
+        self.assertTrue(all(holds[c] >= .3 for c in ('w0-0', 'w0-1', 'w3-0', 'w3-1')), holds)
+        self.assertIn('up: caption shown only', ' '.join(rep['warnings']))          # 0.57s sentence: too short to fix here
+
+    def test_the_page_declares_every_font_it_uses_inline(self):
+        # the HyperFrames compiler reads @font-face from the page only; fonts.css behind a <link> warned on every render
+        (page, _, _), _ = self.build()
+        used = set(re.findall(r"font-family:'([^']+)'", page.split('<body>')[0]))
+        declared = set(re.findall(r"@font-face\{font-family:'([^']+)'[^}]*src:url\('assets/fonts/[^']+\.woff2'\)", page))
+        self.assertTrue(used and used <= declared, (used, declared))
 
     def test_chips_pop_on_their_word(self):
         sp, words, _, _, segs, dur = inputs()
@@ -193,17 +272,59 @@ class Builder(unittest.TestCase):
             self.assertEqual(sum(c for c, _ in B.default_chunks(n)), n)
 
 
-class Check(unittest.TestCase):
-    def test_onset_takes_the_nearest_silence_end_else_the_word(self):
-        self.assertEqual(Q.onset(.4, [.1, .46, 2.0]), .46)
-        self.assertEqual(Q.onset(0.0, [1.18, 4.09]), 0.0)
+class AutoCaptionTop(unittest.TestCase):
+    def test_captions_start_20px_under_the_face_bottom_but_not_above_the_chest_band(self):
+        # a test run: captions sat exactly on two shots' face bottom (0px margin)
+        self.assertEqual(F.caption_top(987, 'reels'), 1007)
+        self.assertEqual(F.caption_top(1158, 'reels'), 1178)
+        self.assertEqual(F.caption_top(854, 'reels'), 940)      # wide shot: chest band floor
+        self.assertEqual(F.caption_top(None, 'reels'), 940)     # no face found
 
+    def test_every_third_frame_is_sampled(self):
+        self.assertEqual(F.sample_frames(10), [0, 3, 6, 9])
+        self.assertEqual(F.sample_frames(2), [0])
+
+    def test_face_bottom_is_the_box_or_60px_under_the_landmark_chin_whichever_is_lower(self):
+        kps = [[400, 500], [600, 500], [500, 600], [450, 700], [550, 700]]   # eyes, nose, mouth corners
+        self.assertEqual(F.face_bottom([300, 300, 700, 987], kps), 987)     # box already below chin 800 + 60
+        self.assertEqual(F.face_bottom([300, 300, 700, 780], kps), 860)     # short box: chin 700 + (700 - 600) + 60
+
+    def test_caption_top_leaves_room_for_one_line_above_the_safe_bottom(self):
+        self.assertEqual(F.caption_top(1400, 'tiktok'), 1174)   # 1260 floor - one 86px line
+        self.assertEqual(F.caption_top(1400, 'reels'), 1384)    # 1470 - 86
+
+
+    def test_builder_uses_the_measured_face_bottom_unless_the_spec_sets_caption_top(self):
+        sp, words, _, _, segs, dur = inputs()
+        del sp['shots'][0]['caption_top']
+        page, _, rep = B.build(sp, B.load_look('bold'), 'reels', segs, words, [], dur,
+                               faces={'c1': {'face_bottom': 1030}, 'c2': {'face_bottom': 500}})
+        tops = {int(g): int(t) for g, t in re.findall(r'id="w(\d+)-0"[^>]*top:(\d+)px', page)}
+        self.assertEqual(tops[0], 1050)                          # auto: face bottom 1030 + 20
+        self.assertEqual(tops[2], 1000)                          # shot 2 keeps its explicit caption_top
+        self.assertEqual(rep['caption_tops'], {'c1': [1050, 'auto'], 'c2': [1000, 'spec']})
+
+
+    def test_a_model_that_does_not_match_the_pinned_hash_is_never_saved(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(RuntimeError, 'sha256'):
+                F.ensure_model(d, download=lambda url: b'not the model')
+            self.assertEqual(os.listdir(d), [])
+
+
+class Check(unittest.TestCase):
     def test_caption_error_is_reveal_minus_measured_onset_in_cut_time(self):
+        import array
+        sr = 16000
+        pcm = array.array('h', [0] * sr * 4)
+        for a, b in ((.06, .6), (2.2, 2.6)):        # the film's speech stem: speech at .06 and 2.2 (Whisper: .1 and 2.1)
+            pcm[int(a * sr):int(b * sr)] = array.array('h', [6000 if k % 7 < 3 else -6000 for k in range(int(b * sr) - int(a * sr))])
         segs = [{'id': 'a', 'clip': 'c1', 'frame': 0, 'src_in': .4, 'word_idx': [0]},
                 {'id': 'b', 'clip': 'c1', 'frame': 60, 'src_in': 3.0, 'word_idx': [1]}]
         words = {'c1': [{'start': .5}, {'start': 3.1}]}
         page = "tl.fromTo('#w0-0',{},{},0.050);tl.fromTo('#w1-0',{},{},2.130);"
-        errs = Q.caption_errors(segs, words, {'c1': [.46, 3.2]}, page)
+        errs = Q.caption_errors(segs, words, (pcm.tobytes(), sr), page)
         self.assertEqual([round(e, 3) for _, _, e in errs], [-.01, -.07])
 
     def test_cut_frames_within_one_frame(self):
@@ -215,6 +336,339 @@ class Check(unittest.TestCase):
     def test_text_check_ignores_case_quotes_and_markup(self):
         page = "<body><div>'take</div><div>five' now</div><span>Got a minute?</span><script>x</script>"
         self.assertEqual(Q.missing_text(page, ["'Take five' now", 'GOT A MINUTE', 'not here']), ['not here'])
+
+
+# Real-voice onset labels are private (a creator's voice is not repo content). Point VIDEO_EDIT_ONSET_FIXTURES at a
+# folder with cN.wav + labels.json ({"sentences": [{sentence, clip, onset, whisper_start, src_in}]}) to run them.
+FIX = os.environ.get('VIDEO_EDIT_ONSET_FIXTURES', '')
+HAVE_FIX = bool(FIX) and os.path.exists(os.path.join(FIX, 'labels.json'))
+
+
+def synthetic(onset, sr=16000, dur=2.0, quiet_db=-50, speech_db=-15):
+    """room noise, then a speech-like burst from `onset`: 16-bit mono PCM bytes"""
+    import array
+    import random
+    rnd = random.Random(7)
+    out = array.array('h')
+    for i in range(int(dur * sr)):
+        t = i / sr
+        amp = 32767 * 10 ** ((speech_db if t >= onset else quiet_db) / 20)
+        out.append(int(max(-32767, min(32767, rnd.gauss(0, amp / 2)))))
+    return out.tobytes(), sr
+
+
+def fixture():
+    import wave
+    with open(os.path.join(FIX, 'labels.json'), encoding='utf-8') as fh:
+        rows = json.load(fh)['sentences']
+    audio = {}
+    for r in rows:
+        if r['clip'] not in audio:
+            with wave.open(os.path.join(FIX, f"{r['clip']}.wav")) as w:
+                audio[r['clip']] = (w.readframes(w.getnframes()), w.getframerate())
+    return rows, audio
+
+
+class SyntheticOnsets(unittest.TestCase):
+    def test_reference_finds_speech_after_a_quiet_room_even_when_whisper_is_early(self):
+        pcm, sr = synthetic(1.0)
+        self.assertAlmostEqual(Q.speech_onset(pcm, sr, .6), 1.0, delta=.04)
+
+    def test_placer_finds_the_speech_start_whisper_missed(self):
+        pcm, sr = synthetic(1.0)
+        self.assertAlmostEqual(B.speech_start(pcm, sr, .5, .6), 1.0, delta=.07)
+
+
+@unittest.skipUnless(HAVE_FIX, 'private real-voice onset labels: set VIDEO_EDIT_ONSET_FIXTURES')
+class OnsetReference(unittest.TestCase):
+    """reel_check's speech onset vs independent labels on real generated voices (not produced by any skill code)"""
+
+    def test_reference_matches_the_independent_labels_within_40ms(self):
+        rows, audio = fixture()
+        off = {}
+        for r in rows:
+            pcm, sr = audio[r['clip']]
+            got = Q.speech_onset(pcm, sr, r['whisper_start'])
+            if abs(got - r['onset']) > .04:
+                off[r['sentence']] = (round(got, 3), r['onset'])
+        self.assertEqual(off, {})
+
+
+@unittest.skipUnless(HAVE_FIX, 'private real-voice onset labels: set VIDEO_EDIT_ONSET_FIXTURES')
+class CaptionPlacement(unittest.TestCase):
+    """build_reel's own onset finder (not reel_check's) on early reveals in the labelled set: s2, s6, s12"""
+
+    def test_placer_finds_the_speech_start_whisper_missed(self):
+        rows, audio = fixture()
+        for sid in ('s2', 's6', 's12'):
+            r = next(x for x in rows if x['sentence'] == sid)
+            got = B.speech_start(*audio[r['clip']], r['src_in'], r['whisper_start'])
+            self.assertAlmostEqual(got, max(r['onset'], r['src_in']), delta=.07, msg=sid)
+
+
+class FilmChecks(unittest.TestCase):
+    """reel_check measures the film itself: sync, cuts, holds (the gaps a test run's verifier found)"""
+
+    def test_full_opacity_time_of_every_caption_chunk(self):
+        page = ("tl.fromTo('#w0-1',{autoAlpha:0},{autoAlpha:1,duration:0.2,ease:'x'},1.850);"
+                "tl.to('#w0-1',{autoAlpha:0,duration:0.12},2.145);"
+                "tl.fromTo('#w1-0',{autoAlpha:0},{autoAlpha:1,duration:0.2},3.000);")
+        self.assertEqual({k: round(v, 3) for k, v in Q.chunk_holds(page, end=5.0).items()}, {'w0-1': .095, 'w1-0': 1.8})
+
+    def test_speech_running_through_a_cut_is_found(self):
+        import array
+        sr = 16000
+        pcm = array.array('h', [0] * sr * 3)
+        loud = lambda a, b: array.array('h', [5000 if k % 9 < 4 else -5000 for k in range(int(b * sr) - int(a * sr))])
+        pcm[int(.3 * sr):int(1.2 * sr)] = loud(.3, 1.2)          # a word straddles the cut at 1.0
+        pcm[int(1.6 * sr):int(2.4 * sr)] = loud(1.6, 2.4)        # the cut at 1.45 sits in a pause
+        self.assertEqual(Q.cuts_in_speech(pcm.tobytes(), sr, [(1.0, True, True), (1.45, True, True)]), [1.0])
+        self.assertEqual(Q.cuts_in_speech(pcm.tobytes(), sr, [(1.0, True, False)]), [1.0])
+
+    def test_film_onset_ignores_the_previous_sentence_across_the_cut(self):
+        import array
+        sr = 16000
+        pcm = array.array('h', [0] * sr * 3)
+        loud = lambda a, b: array.array('h', [5000 if k % 9 < 4 else -5000 for k in range(int(b * sr) - int(a * sr))])
+        pcm[int(.5 * sr):int(1.0 * sr)] = loud(.5, 1.0)          # previous sentence runs right up to the cut at 1.0
+        pcm[int(1.05 * sr):int(1.6 * sr)] = loud(1.05, 1.6)      # this sentence starts 50ms after the cut
+        self.assertAlmostEqual(Q.speech_onset(pcm.tobytes(), sr, .95, not_before=1.0), 1.05, delta=.01)
+
+    def test_a_cut_at_a_shots_first_frame_cuts_nothing_away(self):
+        segs = [{'clip': 'c1', 'frame': 0, 'src_in': .4, 'src_out': 1.4}, {'clip': 'c2', 'frame': 30, 'src_in': 0.0, 'src_out': 1.0}]
+        self.assertEqual(Q.jump_cuts(segs, {'c1': 1.4, 'c2': 4.0}), [(1.0, False, False)])
+
+    def test_seamless_joins_are_not_cuts(self):
+        segs = [{'clip': 'c1', 'frame': 0, 'src_in': .0, 'src_out': 1.0}, {'clip': 'c1', 'frame': 30, 'src_in': 1.0, 'src_out': 2.0},
+                {'clip': 'c2', 'frame': 60, 'src_in': .5, 'src_out': 1.5}, {'clip': 'c2', 'frame': 90, 'src_in': 1.6, 'src_out': 2.0}]
+        self.assertEqual(Q.jump_cuts(segs, {'c1': 4.0, 'c2': 4.0}), [(2.0, True, True), (3.0, True, True)])
+
+    def test_offset_of_a_shifted_signal_and_of_shifted_frames(self):
+        import numpy as np
+        rng = np.random.default_rng(1)
+        src = rng.standard_normal(16000)
+        self.assertAlmostEqual(Q.xcorr_offset(src[3200:6400], src, 16000), .2, places=3)
+
+
+class Assemble(unittest.TestCase):
+    """assemble.py on synthetic 24fps shots, segment lengths off the 30fps grid (a test run drifted +0.209s by s17)"""
+
+    def test_sound_stays_on_the_picture_grid_and_under_the_peak_limit(self):
+        import subprocess
+        import tempfile
+        ff = B.skillenv.tool('ffmpeg')
+        with tempfile.TemporaryDirectory() as d:
+            src = {}
+            for c in ('c1', 'c2'):
+                f = os.path.join(d, f'{c}.mp4')
+                subprocess.run([ff, '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=24:d=4', '-f', 'lavfi',
+                                '-i', 'sine=f=440:r=48000:d=4,volume=0.99', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                                '-c:a', 'aac', f], check=True)
+                src[c] = f
+            edl = [{'id': f's{k}', 'clip': c, 'in': a, 'out': b} for k, (c, a, b) in
+                   enumerate([('c1', .70, 2.94), ('c1', 2.96, 4.0), ('c2', 2.34, 3.76), ('c2', .516, 3.252), ('c1', .1, 1.238)])]
+            for name, data in (('sources.json', src), ('edl.json', edl)):
+                with open(os.path.join(d, name), 'w') as fh:
+                    json.dump(data, fh)
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(B.__file__), 'assemble.py'), d], check=True, capture_output=True)
+            with open(os.path.join(d, 'segments.json')) as fh:
+                segs = json.load(fh)
+            aroll = os.path.join(d, 'assets', 'aroll.mp4')
+            probe = lambda sel: float(subprocess.run([B.skillenv.tool('ffprobe'), '-v', 'error', '-select_streams', sel, '-show_entries',
+                                                      'stream=duration', '-of', 'csv=p=0', aroll], capture_output=True, text=True).stdout)
+            frames = sum(s['frames'] for s in segs)
+            self.assertAlmostEqual(probe('v:0'), frames / 30, delta=.001)
+            pcm = subprocess.run([ff, '-v', 'error', '-i', aroll, '-vn', '-ac', '1', '-ar', '48000', '-f', 's16le', '-'], capture_output=True).stdout
+            self.assertAlmostEqual(len(pcm) / 2 / 48000, frames / 30, delta=.025)   # one AAC frame of padding at most
+            for s in segs:
+                self.assertAlmostEqual(s['src_out'] - s['src_in'], s['frames'] / 30, delta=1e-6, msg=s['id'])
+            # a test run: a 24fps in point between source frames made fps=30 start the picture at frame 1 (start_time
+            # 0.033008) while the sound started at 0; concat then ran the picture one frame ahead on 11 of 17 segments
+            for k in range(len(segs)):
+                starts = subprocess.run([B.skillenv.tool('ffprobe'), '-v', 'error', '-show_entries', 'stream=codec_type,start_time', '-of',
+                                         'csv=p=0', os.path.join(d, 'work', f'seg_{k}.mp4')], capture_output=True, text=True).stdout.split()
+                self.assertEqual(sorted(starts), ['audio,0.000000', 'video,0.000000'], f'seg_{k}')
+            # every jump cut fades the sound out over its last 30ms (b76facf commented the fade-out away by accident)
+            seg0 = subprocess.run([ff, '-v', 'error', '-i', os.path.join(d, 'work', 'seg_0.mp4'), '-vn', '-ac', '1', '-ar', '48000', '-f',
+                                   's16le', '-'], capture_output=True).stdout
+            import array
+            whole, tail = array.array('h', seg0), array.array('h', seg0[-2 * 48:])    # the segment, its last 1ms (fade ends at 0)
+            self.assertLess(max(abs(v) for v in tail), .1 * max(abs(v) for v in whole))
+            peak = subprocess.run([ff, '-hide_banner', '-i', aroll, '-af', 'volumedetect', '-f', 'null', '-'], capture_output=True, text=True).stderr
+            self.assertLessEqual(float(re.search(r'max_volume: (-?[\d.]+) dB', peak).group(1)), -2.5)
+
+
+class RenderWarnings(unittest.TestCase):
+    def test_compile_warnings_reach_the_build_report(self):
+        import tempfile
+        out = ('[render] frame 900/1068\n'
+               '[WARN] [compile] Audio "bga" (assets/aroll.mp4) is 35.39s but its data-duration is 35.57s — the slot is shortened\n'
+               'done\n')
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'build-report.json'), 'w') as fh:
+                json.dump({'warnings': ['s3: moved up'], 'cuts': []}, fh)
+            M.note_render_warnings(d, out)
+            with open(os.path.join(d, 'build-report.json')) as fh:
+                rep = json.load(fh)
+            with open(os.path.join(d, 'work', 'render.log')) as fh:
+                log = fh.read()
+        self.assertEqual(len(rep['warnings']), 2)
+        self.assertIn('data-duration is 35.57s', rep['warnings'][1])
+        self.assertEqual(log, out)
+
+
+class ShotEnd(unittest.TestCase):
+    def test_a_segment_ending_at_the_shot_end_keeps_the_sound_to_its_end(self):
+        # a test shot: 97 frames at 24fps (4.042s) of picture, 4.064s of sound; the last word decays until 4.03s
+        import subprocess
+        import tempfile
+        ff = B.skillenv.tool('ffmpeg')
+        with tempfile.TemporaryDirectory() as d:
+            f, v, a = (os.path.join(d, n) for n in ('c1.mp4', 'v.mp4', 'a.m4a'))
+            subprocess.run([ff, '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=24:d=5', '-frames:v', '97', '-c:v', 'libx264',
+                            '-pix_fmt', 'yuv420p', v], check=True)
+            subprocess.run([ff, '-v', 'error', '-f', 'lavfi', '-i', 'sine=f=300:r=48000:d=4.064,volume=0.5', '-c:a', 'aac', a], check=True)
+            subprocess.run([ff, '-v', 'error', '-i', v, '-i', a, '-c', 'copy', f], check=True)
+            for name, data in (('sources.json', {'c1': f}), ('edl.json', [{'id': 's1', 'clip': 'c1', 'in': 2.46, 'out': 4.064}])):
+                with open(os.path.join(d, name), 'w') as fh:
+                    json.dump(data, fh)
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(B.__file__), 'assemble.py'), d], check=True, capture_output=True)
+            with open(os.path.join(d, 'segments.json')) as fh:
+                seg = json.load(fh)[0]
+        self.assertGreaterEqual(seg['src_out'], 4.04)
+        self.assertAlmostEqual(seg['src_out'] - seg['src_in'], seg['frames'] / 30, delta=1e-6)
+
+    def test_the_planner_may_end_a_sentence_at_the_end_of_the_shots_sound(self):
+        import array
+        sr = 16000
+        pcm = array.array('h', [0] * int(sr * 4.064))
+        pcm[int(2.57 * sr):int(4.03 * sr)] = array.array('h', [5000 if k % 9 < 4 else -5000 for k in range(int(4.03 * sr) - int(2.57 * sr))])
+        sp = {'shots': [{'file': 'a.mp4', 'narration': 'How do you get back?'}]}
+        ws = [{'text': 'How', 'start': 2.4, 'end': 2.7}, {'text': 'do', 'start': 2.7, 'end': 2.8}, {'text': 'you', 'start': 2.8, 'end': 3.0},
+              {'text': 'get', 'start': 3.0, 'end': 3.3}, {'text': 'back?', 'start': 3.3, 'end': 3.9}]
+        edl = E.plan(sp, {'c1': ws}, {'c1': []}, {'c1': 4.0417}, audio={'c1': (pcm.tobytes(), sr)})
+        self.assertGreaterEqual(edl[0]['out'], 4.06)
+
+
+class Provenance(unittest.TestCase):
+    """An edit proves which approved script and which produced shots it cuts (a receipts-only verifier found "no creative
+    approval" when the spec and the QA receipt carried nothing from the approval record). Optional unless required."""
+
+    def packet(self, d):
+        import hashlib
+        files = []
+        for k, text in enumerate(['Busy day, but no time to stop?', 'How do you get back to the moment?']):
+            f = os.path.join(d, f'film-{k + 1}.mp4')
+            with open(f, 'wb') as fh:
+                fh.write(f'shot {k + 1}'.encode())
+            files.append((f, hashlib.sha256(f'shot {k + 1}'.encode()).hexdigest(), text))
+        shots = [{'operationId': f'film:{k + 1}', 'sha256': h, 'narration': t} for k, (_, h, t) in enumerate(files)]
+        prov = {'source': 'producer', 'episodeId': '00000000-0000-4000-8000-000000000001', 'productionId': '00000000-0000-4000-8000-000000000002',
+                'packetSha256': 'a' * 64, 'scriptSha256': 'b' * 64, 'creativeReview': {'status': 'passed', 'inputSha256': 'c' * 64},
+                'approval': {'approvedAt': '2026-11-02T10:47:00Z'}, 'shots': shots}
+        spec = {'shots': [{'file': f, 'narration': t} for f, _, t in files], 'provenance': prov}
+        return spec
+
+    def test_a_spec_without_provenance_passes_unless_provenance_is_required(self):
+        self.assertEqual(Q.provenance_problems({'shots': []}), [])
+        self.assertEqual(Q.provenance_problems({'shots': []}, require=True),
+                         ['no provenance: the spec does not say which approved episode it cuts'])
+
+    def test_provenance_must_show_a_passed_review_and_match_every_shot(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            spec = self.packet(d)
+            self.assertEqual(Q.provenance_problems(spec), [])
+            bad = json.loads(json.dumps(spec)); bad['provenance']['creativeReview']['status'] = 'failed'
+            self.assertIn('creative review is failed, not passed', Q.provenance_problems(bad))
+            bad = json.loads(json.dumps(spec)); bad['shots'][1]['narration'] = 'How do you get back?'
+            self.assertIn('shot 2 narration differs from the approved script', Q.provenance_problems(bad))
+            with open(spec['shots'][0]['file'], 'ab') as fh:
+                fh.write(b'!')
+            self.assertIn('shot 1 file is not the produced shot (sha256 differs)', Q.provenance_problems(spec))
+            src = {'c1': spec['shots'][0]['file'], 'c2': spec['shots'][0]['file']}     # what ingest cut: c2 is the wrong file
+            self.assertIn('shot 2 cut file (sources.json c2) is not the produced shot', Q.provenance_problems(spec, src))
+            bad = json.loads(json.dumps(spec)); bad['shots'].pop()
+            self.assertIn('2 produced shots, the spec cuts 1', Q.provenance_problems(bad))
+
+
+class FaceClearance(unittest.TestCase):
+    def test_every_sampled_frame_inside_the_segment_keeps_20px_between_face_and_caption(self):
+        # 5 frames a shot and 0px margin missed a lean-in; now every ~3rd frame, and each one must clear by 20px
+        segs = [{'clip': 'c1', 'src_in': 1.0, 'src_out': 2.0}, {'clip': 'c2', 'src_in': 0.0, 'src_out': 1.0},
+                {'clip': 'c3', 'src_in': 0.0, 'src_out': 1.0}, {'clip': 'c4', 'src_in': 0.0, 'src_out': 1.0}]
+        faces = {'c1': {'samples': [{'t': .5, 'face_bottom': 1100}, {'t': 1.2, 'face_bottom': 980}, {'t': 1.9, 'face_bottom': 1000}]},
+                 'c2': {'samples': [{'t': .2, 'face_bottom': 900}, {'t': .6, 'face_bottom': None}]},
+                 'c3': {'samples': [{'t': .1, 'face_bottom': None}, {'t': .4, 'face_bottom': None}]},
+                 'c4': {'face_bottom': 900, 'chin_estimate': 840}}
+        layout = [{'id': 'w0-0', 'kind': 'caption', 'box': [0, 1020, 10, 1100]},     # 1000 + 20: clear (t .5 is cut away)
+                  {'id': 'w0-1', 'kind': 'caption', 'box': [0, 1019, 10, 1100]},     # 19px
+                  {'id': 'w1-0', 'kind': 'caption', 'box': [0, 1200, 10, 1300]},     # a frame with no face: unmeasured
+                  {'id': 'w2-0', 'kind': 'caption', 'box': [0, 940, 10, 1000]},      # no face in the shot: chest band
+                  {'id': 'w2-1', 'kind': 'caption', 'box': [0, 930, 10, 1000]},
+                  {'id': 'w3-0', 'kind': 'caption', 'box': [0, 1500, 10, 1600]},     # old faces.json: no frames to check
+                  {'id': 'msg', 'kind': 'message', 'box': [0, 790, 10, 910]}]        # cards are placed by the spec
+        self.assertEqual(Q.face_clearance(layout, segs, faces),
+                         [('w0-1', 1019, 1020), ('w1-0', 1200, 'no face found at 0.60s'), ('w2-1', 930, 940),
+                          ('w3-0', 1500, 'faces.json has no per-frame samples (run faces.py)')])
+
+
+class PictureSync(unittest.TestCase):
+    """reel_check.picture_sync on assemble.py's own output: render frame k of a segment must show the source frame on
+    screen at in + k/30 (ffmpeg puts each 24fps frame on its nearest 30fps slot) to under half a frame, matched by
+    pixels; a segment whose frames cannot be told apart fails (a test run passed 8 of 17 as 'too static to measure')"""
+
+    @classmethod
+    def setUpClass(cls):
+        import subprocess
+        import tempfile
+        import numpy as np
+        cls.tmp = tempfile.TemporaryDirectory()
+        d, ff = cls.tmp.name, B.skillenv.tool('ffmpeg')
+
+        def shot(name, frames):
+            f = os.path.join(d, name)
+            subprocess.run([ff, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', '90x160', '-r', '24', '-i', '-',
+                            '-f', 'lavfi', '-i', 'sine=f=440:r=48000:d=4', '-shortest', '-c:v', 'libx264', '-crf', '10',
+                            '-pix_fmt', 'yuv420p', '-c:a', 'aac', f], input=frames.tobytes(), check=True)
+            return f
+        rng = np.random.default_rng(5)
+        tex = np.kron(rng.integers(0, 256, (96, 16, 9), dtype=np.uint8), np.ones((1, 10, 10), np.uint8))   # every frame its own
+        cls.src = {'c1': shot('c1.mp4', tex), 'c2': shot('c2.mp4', np.repeat(tex[:1], 96, 0))}            # c2: one still frame
+        edl = [{'id': f's{k}', 'clip': c, 'in': a, 'out': b} for k, (c, a, b) in
+               enumerate([('c1', .70, 2.0), ('c1', .516, 1.9), ('c1', 1.238, 2.6), ('c2', .3, 1.6)])]
+        for name, data in (('sources.json', cls.src), ('edl.json', edl)):
+            with open(os.path.join(d, name), 'w') as fh:
+                json.dump(data, fh)
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(B.__file__), 'assemble.py'), d], check=True, capture_output=True)
+        with open(os.path.join(d, 'segments.json')) as fh:
+            cls.segs = json.load(fh)
+        cls.aroll, cls.ahead = os.path.join(d, 'assets', 'aroll.mp4'), os.path.join(d, 'ahead.mp4')
+        subprocess.run([ff, '-v', 'error', '-y', '-i', cls.aroll, '-vf', 'trim=start_frame=1,setpts=PTS-STARTPTS', '-c:v', 'libx264',
+                        '-crf', '10', '-c:a', 'aac', cls.ahead], check=True)          # the picture one frame ahead of its sound
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_the_limit_is_under_half_a_frame(self):
+        self.assertLess(Q.PIC_LIMIT, .5 / 30)
+
+    def test_assembled_picture_sits_on_its_sound_to_under_half_a_frame(self):
+        got = Q.picture_sync(self.aroll, self.segs[:3], self.src, 1920)
+        for sid, r in got.items():
+            self.assertIsNone(r['reason'], (sid, r))
+            self.assertLess(max(abs(r['lo']), abs(r['hi'])), Q.PIC_LIMIT, (sid, r))
+            self.assertGreaterEqual(r['matched'], Q.PIC_MIN_MATCHED)
+
+    def test_a_picture_one_frame_ahead_fails(self):
+        got = Q.picture_sync(self.ahead, self.segs[:3], self.src, 1920)
+        for sid, r in got.items():
+            self.assertRegex(r['reason'] or '', 'picture off', (sid, r))
+
+    def test_frames_that_cannot_be_told_apart_fail_closed(self):
+        r = Q.picture_sync(self.aroll, self.segs[3:], self.src, 1920)['s3']
+        self.assertRegex(r['reason'] or '', '^unmeasurable', r)
 
 
 class Example(unittest.TestCase):

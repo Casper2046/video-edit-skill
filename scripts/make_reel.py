@@ -3,8 +3,10 @@
 
 Usage:  PY make_reel.py <reel.json> --out <project_dir> [--from STAGE] [--to STAGE] [--look NAME] [--platform NAME]
                         [--label NAME] [--expect-cuts 83,183,...] [--expect-text FILE] [--expect-duration S]
+                        [--require-provenance]
 Stages, in order:
   ingest      per-shot words (small.en, onset-corrected) + silence maps   ingest.py --keep-order
+  faces       lowest chin per shot -> caption_top where the spec has none  faces.py
   edl         one segment per narration sentence                          edl_from_words.py
   assemble    assets/aroll.mp4 + segments.json, end-card hold             assemble.py --end-hold
   transcribe  medium.en words on the cut (caption timing)                 transcribe_cut.py
@@ -31,7 +33,7 @@ SCRIPTS = os.path.join(SK, 'scripts')
 TEMPLATE = os.path.join(SK, 'assets', 'template')
 GSAP = ('gsap.min.js', 'c174bfce53a729418d57a8ad8625e7247c793a22fef8e2851e3cfa3de9cd8280',
         ['https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js', 'https://unpkg.com/gsap@3.14.2/dist/gsap.min.js'])
-STAGES = ['ingest', 'edl', 'assemble', 'transcribe', 'build', 'render', 'check']
+STAGES = ['ingest', 'faces', 'edl', 'assemble', 'transcribe', 'build', 'render', 'check']
 
 
 def arg(name, default=None):
@@ -45,6 +47,33 @@ def run(stage, cmd, cwd=None):
     print(f'== {stage}: exit {code} in {time.time() - t0:.0f}s', flush=True)
     if code:
         sys.exit(code)
+
+
+def note_render_warnings(proj, output):
+    """keep the render's output in work/render.log and add its [WARN] lines to build-report.json (reel_check fails on them)"""
+    os.makedirs(os.path.join(proj, 'work'), exist_ok=True)
+    with open(os.path.join(proj, 'work', 'render.log'), 'w', encoding='utf-8') as fh:
+        fh.write(output)
+    warned = [ln.strip() for ln in output.splitlines() if '[WARN]' in ln]
+    path = os.path.join(proj, 'build-report.json')
+    if warned and os.path.exists(path):
+        with open(path, encoding='utf-8') as fh:
+            rep = json.load(fh)
+        rep['warnings'] = rep.get('warnings', []) + warned
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(rep, fh, indent=1)
+
+
+def run_logged(stage, cmd, proj, cwd=None):
+    """run() for the render: its output is shown, kept and searched for warnings"""
+    t0 = time.time()
+    print(f'== {stage}: {" ".join(os.path.basename(c) if os.sep in c else c for c in cmd[1:4])} ...', flush=True)
+    p = subprocess.run(cmd, cwd=cwd, **skillenv.TEXT)
+    print(p.stdout + p.stderr, end='', flush=True)
+    note_render_warnings(proj, p.stdout + p.stderr)
+    print(f'== {stage}: exit {p.returncode} in {time.time() - t0:.0f}s', flush=True)
+    if p.returncode:
+        sys.exit(p.returncode)
 
 
 def setup(spec_path, proj):
@@ -112,6 +141,8 @@ def main():
     for stage in STAGES[first:last + 1]:
         if stage == 'ingest':
             run(stage, [py, os.path.join(SCRIPTS, 'ingest.py'), proj, '--keep-order', *[s['file'] for s in spec['shots']]])
+        elif stage == 'faces':
+            run(stage, [py, os.path.join(SCRIPTS, 'faces.py'), proj])
         elif stage == 'edl':
             run(stage, [py, os.path.join(SCRIPTS, 'edl_from_words.py'), proj])
         elif stage == 'assemble':
@@ -122,10 +153,12 @@ def main():
             run(stage, [py, os.path.join(SCRIPTS, 'build_reel.py'), proj, '--look', look, '--platform', platform])
         elif stage == 'render':
             run('lint', [py, os.path.join(SCRIPTS, 'hf.py'), 'lint'], cwd=proj)
-            run(stage, [py, os.path.join(SCRIPTS, 'hf.py'), 'render', '-o', render, '--quality', 'high'], cwd=proj)
+            run_logged(stage, [py, os.path.join(SCRIPTS, 'hf.py'), 'render', '-o', render, '--quality', 'high'], proj, cwd=proj)
         elif stage == 'check':
             run('cuts', [py, os.path.join(SCRIPTS, 'check_cuts.py'), proj, render, '--phone'])
             qa = [py, os.path.join(SCRIPTS, 'reel_check.py'), proj, '--render', render, '--sheet']
+            if '--require-provenance' in sys.argv:
+                qa.append('--require-provenance')
             for flag in ('--expect-cuts', '--expect-text', '--expect-duration'):
                 if arg(flag):
                     qa += [flag, arg(flag)]
