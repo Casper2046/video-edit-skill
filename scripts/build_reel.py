@@ -396,13 +396,13 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
     if look.get('cut_punch', 1) > 1:
         grade += [f"tl.fromTo('#stage',{{scale:{look['cut_punch']}}},{{scale:1,duration:{PUNCH_S},ease:'power2.out',immediateRender:false}},{t:.3f});"
                   for t in T[1:]]
-    audio = []
-    if WHOOSH[0] in sfx:
+    audio, sfx_on = [], spec.get('sfx') is not False     # spec "sfx": false: no sound effects (render_packet.py)
+    if WHOOSH[0] in sfx and sfx_on:
         for k, g in enumerate(g for g in range(1, n) if segs[g]['clip'] != segs[g - 1]['clip']):
             d = min(WHOOSH[1], dur - T[g])
             audio.append(f'<audio id="sfx{k}" src="assets/sfx/{WHOOSH[0]}.mp3" data-start="{T[g]:.3f}" data-duration="{d:.3f}" '
                          f'data-track-index="{10 + k % 2}" data-volume="{WHOOSH[2] * SFX_GAIN:.3f}"></audio>')
-    elif n > 1:
+    elif n > 1 and sfx_on:
         warn.append('no assets/sfx/whoosh-short.mp3: shot changes have no whoosh')
 
     page = PAGE.format(gsap=gsap, fonts=font_faces(), css=css(look), dur=f'{dur:.3f}', audio='\n'.join(audio),

@@ -88,8 +88,8 @@ For shots that already say their script (AI-generated talking shots, one narrati
 the hand-adapted template: describe the reel once in a **reel spec** and run one command. Start from
 `examples/reel.example.json`:
 - `shots[]`: `file`, `narration` (the caption truth: words, spelling, quotes), optional `caption_top` (y of the first
-  caption line; without it the `faces` stage samples every 3rd frame, takes the lowest face bottom (YuNet box, or 60px
-  under a landmark chin estimate if lower) and starts captions 20px under it, never above the chest band y940, always
+  caption line; without it the `faces` stage samples every frame, takes the lowest face bottom (YuNet box, or 60px
+  under a landmark chin estimate if lower) and starts captions 23px under it (20px margin, 3px render headroom), never above the chest band y940, always
   leaving one line above the safe bottom: an explicit value wins), optional `clean_from` (seconds: the shot's first
   clean frame; the first in point moves there when no speech is lost, else the segment carries an "opening" note).
 - `provenance` (optional): where the shots and script come from (episode, production, approval, a passed review, each
@@ -101,21 +101,79 @@ the hand-adapted template: describe the reel once in a **reel spec** and run one
 - `cards`: `steps[]` {from, to, text}; `chips[]` {until, items[] {sentence, word | offset, nth, text, accent}};
   `message` {from, until, label, text, top}; `end` {lines[[text, class]], top, hold}. `until: "end"` = end-card start.
 - `look`: a pack in `looks/` (`bold`, `cool-girl`). `platform`: `reels`, `tiktok` or `shorts` (safe zones in layout.md).
+- `"sfx": false`: no sound effects (none are copied into the project or placed on the timeline). The render engine
+  always sets it.
 
 ```bash
 PY SK/scripts/make_reel.py <reel.json> --out <project>                      # all stages
 PY SK/scripts/make_reel.py <reel.json> --out <project> --from build --look cool-girl --platform tiktok
 ```
-Stages: ingest (small.en per shot, onset-corrected) -> faces (YuNet face box on every 3rd frame, CPU; the 232 KB model
+Stages: ingest (small.en per shot, onset-corrected) -> faces (YuNet face box on every frame, CPU; the 232 KB model
 downloads once into `SK/.models`, sha256-pinned) -> edl (one segment per sentence) -> assemble (+ end-card hold)
 -> transcribe (medium.en on the cut: caption timing) -> build (index.html, layout.json, build-report.json) -> render
 -> check (cut sheet, phone copy, caption sheet, `reel_check.py` on the film itself: caption onset vs its own speech-onset
-finder, audio and picture sync per segment, speech through cuts, chunk holds, peak level, safe zone, face clearance,
-expected text, render warnings; exit 1 on failure). Outputs land in `<project>/renders/<slug>-<look>-<platform>*`. A spec mistake
+finder, caption presence, audio and picture sync per segment, speech through cuts, chunk holds, peak level, safe zone,
+face clearance, expected text, render warnings; exit 1 on a failed check, 3 when a stage fails). Outputs land in `<project>/renders/<slug>-<look>-<platform>*`. A spec mistake
 (chunk count, unknown sentence id, a chip word that is not said) stops the build with the sentence named.
 Read `build-report.json` warnings: a caption block that had to move up to fit the platform may cover the chin.
 Spec mode does not use the cutout (no behind-head words yet); shots need headroom (head top below y400) first.
 Tests: `PY SK/tests/test_spec_mode.py`.
+
+## Render engine (an edit packet in, a film and its QA report out)
+
+For a production system that hands over an approved episode, not a reel spec:
+```bash
+PY SK/scripts/render_packet.py <packet.json> --shots <dir> --out <dir> [--look bold] [--platform reels]
+```
+- Packet: `{shots: [{narration}], provenance: {episodeId, productionId, ..., creativeReview, approval, shots:
+  [{operationId, sha256, narration, url, ...}]}}`. `--shots` holds the staged shot files; each is matched by its sha256
+  against `provenance.shots[i].sha256`. `url` is never fetched.
+- It writes `<out>/packet.reel.json` (shots in packet order, provenance copied in, `"sfx": false`, no `sentences` or
+  `caption_top`, a shot's `clean_from` where `openings.py` finds an unclean opening), `<out>/openings.json` (every
+  shot's opening note; `reel_check.py` copies it into `qa-report.json` under `openings` and prints a line for each shot
+  whose `clean_from` was not found or not applied) and `<out>/expected-text.txt`, then runs
+  `make_reel.py --require-provenance --expect-text` into `<out>`.
+- Exit codes (render_packet.py and make_reel.py):
+  - `0` every check passes;
+  - `1` a QA check failed (`reel_check.py`): `<out>/qa-report.json` and the printed `QA FAIL` line name the check and
+    its shot, segment or element;
+  - `2` refused before any stage runs: a shot missing, ambiguous, with another sha256, or matching its sha256 but not
+    decodable; narration differing from the approved one; no passed review or approval; a packet that is not JSON; a
+    usage error;
+  - `3` a pipeline stage failed or something crashed: the stage's own exit code is printed on its `== <stage>: exit N`
+    line, with a Python traceback, or the render's output when a render fails (a signal is 3 too). No retry.
+- Film: `<out>/renders/<slug>-<look>-<platform>.mp4`, 1080x1920, with its `-qa.json`, sheets and page copy beside it.
+
+Checks measured on the render: the `render` stage renders the page twice, the film and then an overlays-only copy
+(`work/overlays.html`: no video or audio, captions tagged one colour, text shadows another) as an RGBA PNG sequence in
+`work/overlays/` (`overlay_mask.py`). Its alpha is the overlay mask: per frame, the boxes of every overlay pixel (ink),
+the captions, and the text shadows. From it, on the film's own frames and audio:
+- caption onset: the first frame showing each sentence's caption against the speech onset found on the render's
+  audio; a failure names every sentence over the limit, worst first;
+- caption presence: every caption element in `layout.json` shows on some frame within its planned span; one never
+  shown fails, named with its sentence;
+- safe zone: ink inside the platform's safe zone on every settled frame (an element's planned span minus its fades);
+- face clearance: YuNet on every 3rd rendered frame (`FACE_STEP`), settled caption ink 20px under the face found on
+  that frame and never above y940. The planner (`faces.py`) samples every source frame and adds 3px
+  (`RENDER_HEADROOM`) because the rendered faces sit up to 3px lower; the checker samples the render.
+- Information, never a failure: a text shadow (halo) past the line, and ink past it only during a fade (spill).
+`layout.json` only names which element a rendered box belongs to and when it is planned.
+
+Environment: `VIDEO_EDIT_HYPERFRAMES` names an installed hyperframes binary (the render image sets it; otherwise a
+hyperframes on PATH at the pinned version, else `npx --yes hyperframes@0.8.34`); `VIDEO_EDIT_GSAP` names a local
+GSAP 3.14.2 (sha256-checked; otherwise the CDN).
+
+Tests: `PY -m unittest discover -s SK/tests` (synthetic only, no network). `test_render_packet.py` (packet entry point
+and exit codes), `test_render_checks.py` (overlay mask, onset, presence, safe zone, face clearance, openings in the
+report), `test_openings.py` (unclean openings), `test_offline_image.py` (the image's offline wiring), `test_spec_mode.py`
+and `test_platform.py`. Two suites also run against private labelled footage when pointed at it, and skip otherwise:
+`VIDEO_EDIT_ONSET_FIXTURES` (a folder of `cN.wav` + `labels.json` with speech-onset labels) and
+`VIDEO_EDIT_OPENING_FIXTURES` (a folder of shots + `labels.json` with `clean_from` labels).
+
+In a container: `docker/Dockerfile` builds the offline image (pinned models, YuNet, GSAP, hyperframes, Chrome; no sound
+effects), whose entrypoint is `render_packet.py`. Run it with `--network none`, the packet and shots mounted
+read-only. Usage, the manifest and the memory note are in `docker/README.md`. HyperFrames renders with 1 worker
+(its low-memory profile) when the container has 8 GiB of memory or less; `PRODUCER_LOW_MEMORY_MODE=false` turns that off.
 
 ## Hard rules
 1. Everything inside the Reels safe zone: top 220, bottom 450 (nothing below y 1470), sides 35, right 100 from y 1155.

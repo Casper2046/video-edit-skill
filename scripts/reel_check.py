@@ -1,25 +1,38 @@
 #!/usr/bin/env python3
-"""Spec mode QA: measure a built reel against the audio and the spec. Exit 1 when any check fails.
+"""Spec mode QA: measure a built reel against the audio and the spec. Exit 1 when any check fails, 3 on a crash.
 
-Usage:  PY reel_check.py <project_dir> [--render FILE] [--max-onset-err 0.15] [--expect-cuts 83,183,...]
+Usage:  PY reel_check.py <project_dir> [--render FILE] [--overlays DIR] [--max-onset-err 0.15] [--expect-cuts 83,183,...]
                          [--expect-text FILE] [--expect-duration SECONDS] [--sheet]
+Caption onset, safe zone and face clearance are measured on the render: --render's frames and audio, and the overlay
+mask (overlay_mask.py) from the overlays-only render in --overlays (default work/overlays, make_reel.py renders it with
+the film; it must have the film's frame count), as is caption presence. Without them these fail as NOT MEASURED. layout.json only names
+which element a rendered box belongs to.
 Checks:
-  caption onset  first caption chunk of each sentence (read from index.html) vs the speech onset measured on the source
-                 shot (speech_onset: pre-emphasised energy against the local floor, searched -0.25..+1.0s around the
-                 sentence's first word), mapped into cut time. Its own code, not build_reel's speech_start.
+  caption onset  the first rendered frame from each sentence's cut showing caption pixels vs the speech onset measured on
+                 the render's audio (speech_onset: pre-emphasised energy against the local floor, searched -0.25..+1.0s
+                 around the sentence's first word). Its own code, not build_reel's speech_start. A failure names
+                 every sentence over the limit, worst first
+  caption presence every caption element in layout.json shows caption ink on a rendered frame in its planned span;
+                 one never shown fails, named with its sentence
   cuts           cut frames from segments.json vs --expect-cuts (+-1 frame)
   text           every line of --expect-text (one phrase per line) appears in the reel's on-screen text
-  safe zone      every box in layout.json inside the platform's safe zone
+  safe zone      rendered ink (overlay_mask: every overlay pixel but text shadows) inside the platform's safe zone on
+                 every settled frame (an element's layout span minus its planned fade-in and fade-out: layout.json gives
+                 timing only); the text-shadow halo and ink during fades are recorded as information
+  ink timing     no ink on screen outside the planned span of every element it overlaps (one frame either side)
   duration       --render's duration vs --expect-duration (+-0.2s)
   provenance     when reel.json carries one (from a production system): a passed creative review and an approved production, and
                  shot by shot the approved narration and the produced file's sha256, for the spec's file and the file
                  ingest cut (sources.json) (provenance_problems); copied into qa-report. --require-provenance fails a
                  spec without one (for pipelines that may only cut approved episodes)
-  face clearance when faces.json exists (faces.py): on every sampled frame inside a caption's segment the caption box
-                 starts FACE_MARGIN (20px) under the face bottom, or at the chest band (y940) if that is lower; a sampled
-                 frame there with no face found cannot be checked and fails
+  face clearance YuNet (faces.py) on every 3rd rendered frame: on each one with settled caption ink, its top pixel
+                 sits FACE_MARGIN (20px) under the face found on it, and never above the chest band (y940); such a frame
+                 with no face found cannot be checked and fails; a shot with no face on any sampled frame keeps the band.
+                 Halo and fades recorded as information, as for the safe zone
   picture sync   --render: each segment's picture against its source shot by pixels (picture_sync): the matched source
                  frames must put the picture within PIC_LIMIT (under half a frame) of its sound; unmeasurable fails
+  openings       information: openings.json (render_packet.py), when the project has one, is copied into qa-report
+                 under "openings"; a shot whose clean_from was not found or not applied gets one printed line
 --sheet writes work/caption_sheet.jpg: a render frame for every sentence, unsafe area tinted red.
 Writes qa-report.json.
 """
@@ -34,8 +47,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
-from build_reel import FPS, H, PLATFORMS, PUNCH_S, W, inside  # noqa: E402
+from build_reel import FPS, H, PLATFORMS, PUNCH_S, W, inside, right_edge  # noqa: E402
+from overlay_mask import ALPHA, MIN_AREA, read as read_overlays  # noqa: E402
 from faces import CHEST_TOP, FACE_MARGIN  # noqa: E402
+
+FACE_STEP = 3      # face clearance checks every 3rd rendered frame (faces.py plans on every source frame)
 
 def pcm16k(f):
     """a shot's audio as 16-bit mono 16kHz PCM"""
@@ -166,12 +182,6 @@ def xcorr_offset(probe, ref, sr):
     return int(np.argmax(c / win)) / sr
 
 
-def video_fps(f):
-    num, den = (subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate',
-                                '-of', 'csv=p=0', f], **skillenv.TEXT).stdout.strip().split(',')[0].split('/') + ['1'])[:2]
-    return float(num) / float(den)
-
-
 def band_frames(f, rows, pre=''):
     """every frame as 360x640 grey (cover-cropped to 1080x1920 like assemble.py, after the `pre` crop), rows [0, rows) only"""
     import numpy as np
@@ -207,7 +217,7 @@ def picture_sync(render, segs, src, band, covered=()):
     for s in segs:
         f, z, cx, cy = src[s['clip']], s.get('zoom', 1), s.get('cx', .5), s.get('cy', .5)
         if (f, z, cx, cy) not in cache:
-            cache[f, z, cx, cy] = (band_frames(f, rows, crop(z, cx, cy, *size(f))), video_fps(f))
+            cache[f, z, cx, cy] = (band_frames(f, rows, crop(z, cx, cy, *size(f))), skillenv.video_fps(f))
         sv, fps = cache[f, z, cx, cy]
         moving = np.abs(np.diff(sv[int(s['src_in'] * fps):int(s['src_out'] * fps) + 2], axis=0)).mean(0)
         mask = (moving >= np.quantile(moving[free], 1 - PIC_MOVING)) & free if moving.size else free
@@ -257,15 +267,62 @@ def norm_text(t):
     return ' '.join(''.join(c if c.isalnum() else ' ' for c in t.lower().replace("'", '').replace('’', '')).split())
 
 
-def caption_errors(segs, words, stem, page):
-    """[(sentence id, onset in the film, error s)]: caption reveal - speech onset measured on the film's speech stem
-    (assets/aroll.mp4, before the whooshes), near where the sentence's first word should be"""
-    rev, out = reveal_times(page), []
+def caption_shown(frames, segs):
+    """{segment index: time of the first rendered frame from its cut to the next showing caption pixels (overlay_mask),
+    None if none does}: the sentence's first caption chunk (the one before is gone at the cut)"""
+    out = {}
+    for g, s in enumerate(segs):
+        end = min(segs[g + 1]['frame'] if g + 1 < len(segs) else len(frames), len(frames))
+        out[g] = next((frames[i]['t'] for i in range(s['frame'], end) if frames[i]['caption']), None)
+    return out
+
+
+def caption_errors(segs, words, audio, shown):
+    """[(sentence id, onset in the film, error s or None)]: when the caption is shown (caption_shown) - the speech onset
+    measured on the film's audio near where the sentence's first word should be; None when it is never shown"""
+    out = []
     for g, s in enumerate(segs):
         guess = s['frame'] / FPS + words[s['clip']][s['word_idx'][0]]['start'] - s['src_in']
-        on = speech_onset(*stem, guess, not_before=s['frame'] / FPS)
-        out.append((s['id'], on, rev[g] - on))
+        on = speech_onset(*audio, guess, not_before=s['frame'] / FPS)
+        out.append((s['id'], on, None if shown[g] is None else shown[g] - on))
     return out
+
+
+def onset_failure(errs, lim):
+    """the caption-onset failure naming every sentence over the limit, worst first; None when none is"""
+    over = sorted(((sid, e) for sid, _, e in errs if e is not None and abs(e) > lim), key=lambda x: -abs(x[1]))
+    if not over:
+        return None
+    return f'caption onset worst {abs(over[0][1]):.3f}s > {lim}s: ' + ', '.join(f'{sid} {e:+.3f}s' for sid, e in over)
+
+
+def caption_presence(frames, layout, segs):
+    """{caption element id: its sentence id} for every caption in layout.json that no rendered frame in its planned
+    span (t0..t1) shows: no caption ink (overlay_mask) overlapping its box"""
+    out = {}
+    for e in layout:
+        if e['kind'] == 'caption' and not any(e['t0'] <= f['t'] <= e['t1'] and any(overlap(e['box'], b) for b in f['caption'])
+                                              for f in frames):
+            out[e['id']] = segs[int(e['id'][1:].split('-')[0])]['id']
+    return out
+
+
+def openings_report(proj, segs):
+    """(openings.json's notes (render_packet.py) or None, one line per shot whose clean_from was not found or not
+    applied: the shot's first segment then carries edl_from_words' "opening" note)"""
+    path = os.path.join(proj, 'openings.json')
+    if not os.path.exists(path):
+        return None, []
+    with open(path, encoding='utf-8') as fh:
+        notes = json.load(fh)
+    lines = []
+    for n in notes:
+        kept = next((s for s in segs if s['clip'] == f"c{n['shot']}" and 'opening' in s), None)
+        if n['clean_from'] is None:
+            lines.append(f"opening shot {n['shot']}: no clean_from found ({n['note']})")
+        elif kept:
+            lines.append(f"opening shot {n['shot']}: clean_from {n['clean_from']}s not applied (segment {kept['id']}: {kept['opening']})")
+    return notes, lines
 
 
 def av_sync(render, segs, src):
@@ -292,30 +349,147 @@ def cut_mismatch(segs, expected):
     return f'cut frames off by more than 1: {bad}' if bad else None
 
 
-def face_clearance(layout, segs, faces):
-    """[(caption id, box top, required top or why it cannot be checked)]: on every frame faces.py sampled inside the
-    caption's segment the caption starts FACE_MARGIN under the face bottom (and never above the chest band); a sampled
-    frame there with no face found cannot be checked and fails; a shot with no face anywhere keeps the chest band"""
-    bad = []
-    for e in layout:
-        if e['kind'] != 'caption':
-            continue
-        s = segs[int(e['id'][1:].split('-')[0])]
-        samples = faces.get(s['clip'], {}).get('samples')
-        if samples is None:
-            bad.append((e['id'], e['box'][1], 'faces.json has no per-frame samples (run faces.py)'))
-            continue
-        inside = [x for x in samples if s['src_in'] - 1e-6 <= x['t'] <= s['src_out'] + 1e-6]
-        need = CHEST_TOP
-        if any(x['face_bottom'] is not None for x in samples):
-            missed = [x['t'] for x in inside if x['face_bottom'] is None]
-            if missed or not inside:
-                bad.append((e['id'], e['box'][1], f'no face found at {missed[0]:.2f}s' if missed else 'no sampled frame in the segment'))
+def film_faces(render, detect=None):
+    """{film frame: face bottom or None} on every FACE_STEP-th rendered frame: YuNet (faces.py) on the frame scaled by 1/3
+    into its 640x640 input, the face bottom (faces.face_bottom) back in 1080x1920 pixels. detect: a stand-in for tests"""
+    import numpy as np
+    import faces as F
+    if detect is None:
+        import onnxruntime as ort
+        session = ort.InferenceSession(F.ensure_model(), providers=['CPUExecutionProvider'])
+        detect = lambda img: F.detect(session, img)            # noqa: E731
+    raw = subprocess.run([skillenv.tool('ffmpeg'), '-v', 'error', '-i', render, '-vf', f"select='not(mod(n\\,{FACE_STEP}))',scale=360:640",
+                          '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True, check=True).stdout
+    out = {}
+    for k, img in enumerate(np.frombuffer(raw, np.uint8).reshape(-1, 640, 360, 3)):
+        pad = np.zeros((F.SIDE, F.SIDE, 3), np.uint8)
+        pad[:, :360] = img
+        hit = detect(pad)
+        out[k * FACE_STEP] = None if hit is None else round(F.face_bottom([v * 3 for v in hit[1]], [[x * 3, y * 3] for x, y in hit[2]]))
+    return out
+
+
+FADE_IN = {'caption': .2, 'end': .25, 'step': .3, 'chips': .3, 'message': .35}   # build_reel's planned entrances (s)
+FADE_OUT = .15     # its longest planned exit (.08-.15s)
+NO_SPILL = {'halo_px': 0, 'spill_px': 0, 'spill_frames': 0}
+
+
+def overlap(a, b):
+    return max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def element_at(box, t, layout):
+    """id of the layout element a rendered box belongs to (naming only): of those planned on screen at t (+-0.25s), the
+    one it overlaps most, else the nearest; None when nothing is planned then"""
+    def gap(b):
+        return max(b[0] - box[2], box[0] - b[2], 0) + max(b[1] - box[3], box[1] - b[3], 0)
+    on = [e for e in layout if e['t0'] - .25 <= t <= e['t1'] + .25]
+    return min(on, key=lambda e: (-overlap(e['box'], box), gap(e['box'])))['id'] if on else None
+
+
+def settled(box, t, layout):
+    """True when every element planned near t (+-0.25s) that a rendered box overlaps is past its planned fade-in and
+    before its fade-out. layout.json gives the timing only; a box overlapping none is never settled (unexplained_ink
+    catches it)"""
+    on = [e for e in layout if e['t0'] - .25 <= t <= e['t1'] + .25 and overlap(e['box'], box)]
+    return bool(on) and all(e['t0'] + FADE_IN.get(e['kind'], .2) <= t <= e['t1'] - FADE_OUT for e in on)
+
+
+def zone_margin(z, box):
+    """px between a box and the nearest edge of the zone (negative: outside)"""
+    x0, y0, x1, y1 = box
+    return min(x0 - z['left'], y0 - z['top'], right_edge(z, y0, y1) - x1, H - z['bottom'] - y1)
+
+
+def overlay_frames(render, d):
+    """(per-frame boxes of the overlay render in d (overlay_mask), None), or (None, why the render-measured checks
+    cannot run): it must exist and have exactly the film's frame count"""
+    if not render:
+        return None, 'no --render'
+    if not os.path.isdir(d):
+        return None, f'no overlay frames at {d}'
+    n = int(subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
+                            'stream=nb_read_packets', '-of', 'csv=p=0', render], **skillenv.TEXT).stdout.strip().split(',')[0])
+    frames = read_overlays(d)
+    return (frames, None) if len(frames) == n else (None, f'{len(frames)} overlay frames for a {n}-frame film')
+
+
+def spill(info, name, px):
+    r = info.setdefault(name, dict(NO_SPILL))
+    r['spill_px'], r['spill_frames'] = max(r['spill_px'], px), r['spill_frames'] + 1
+
+
+def safe_zone(frames, zone, layout):
+    """({element id, or 'unplanned': (first time, box)} for rendered ink outside the zone on a settled frame,
+    {element id: info}). Information, never a failure: how far a settled element's text shadow reaches past the zone
+    (halo_px), and its ink outside the zone during fades (spill_px, spill_frames)"""
+    fails, info = {}, {e['id']: dict(NO_SPILL) for e in layout}
+    for f in frames:
+        for b in f['ink']:
+            if inside(zone, b):
                 continue
-            need = max([CHEST_TOP] + [x['face_bottom'] + FACE_MARGIN for x in inside])
-        if e['box'][1] < need:
-            bad.append((e['id'], e['box'][1], need))
-    return bad
+            name = element_at(b, f['t'], layout) or 'unplanned'
+            if settled(b, f['t'], layout):
+                fails.setdefault(name, (f['t'], b))
+            else:
+                spill(info, name, -zone_margin(zone, b))
+        for b in f['halo']:
+            if not inside(zone, b) and settled(b, f['t'], layout):
+                r = info.setdefault(element_at(b, f['t'], layout) or 'unplanned', dict(NO_SPILL))
+                r['halo_px'] = max(r['halo_px'], -zone_margin(zone, b))
+    return fails, info
+
+
+def unexplained_ink(frames, layout):
+    """{element id, or 'unplanned': (first time, box)}: ink on a rendered frame where no element it overlaps is planned
+    on screen (t0..t1, one frame either side), so wrong timing cannot hide a box from the settled-frame checks"""
+    out = {}
+    for f in frames:
+        for b in f['ink']:
+            hit = [e for e in layout if overlap(e['box'], b)]
+            if not any(e['t0'] - 1 / FPS <= f['t'] <= e['t1'] + 1 / FPS for e in hit):
+                out.setdefault(max(hit, key=lambda e: overlap(e['box'], b))['id'] if hit else 'unplanned', (f['t'], b))
+    return out
+
+
+def face_clearance(frames, segs, faces, layout):
+    """([(caption id, time, caption top, required top or why it cannot be checked)], {sentence id: closest caption top -
+    face bottom}, {caption id: info}): on every sampled frame (faces: film_faces) whose caption ink (overlay_mask) is
+    settled, the top caption ink pixel sits FACE_MARGIN under the face bottom found on that frame and never above the
+    chest band. Such a frame with no face found cannot be checked and fails; a shot with no face on any sampled frame
+    keeps the chest band. One failure per caption, its first. Information, never a failure: how far a settled caption's
+    text shadow reaches past that line (halo_px), and its ink past it during fades (spill_px, spill_frames)."""
+    caps = [e for e in layout if e['kind'] == 'caption']
+    seg_at = {i: g for g, s in enumerate(segs) for i in range(s['frame'], s['frame'] + s['frames'])}
+    has_face = {segs[seg_at[i]]['clip'] for i, fb in faces.items() if fb is not None and i in seg_at}
+    bad, margin, info = {}, {}, {e['id']: dict(NO_SPILL) for e in caps}
+    for i, fb in sorted(faces.items()):
+        if i >= len(frames) or i not in seg_at or not frames[i]['caption']:
+            continue
+        s, t = segs[seg_at[i]], frames[i]['t']
+        need = CHEST_TOP if s['clip'] not in has_face else None if fb is None else max(CHEST_TOP, fb + FACE_MARGIN)
+        steady = [b for b in frames[i]['caption'] if settled(b, t, caps)]
+        moving = [b for b in frames[i]['caption'] if b not in steady]
+        if moving and need is not None:
+            box = min(moving, key=lambda b: b[1])
+            if box[1] < need:
+                spill(info, element_at(box, t, caps) or s['id'], need - box[1])
+        if not steady:
+            continue
+        box = min(steady, key=lambda b: b[1])
+        name = element_at(box, t, caps) or s['id']
+        if need is None:
+            bad.setdefault(name, (name, t, box[1], 'no face found on this frame'))
+            continue
+        if fb is not None:
+            margin[s['id']] = min(margin.get(s['id'], box[1] - fb), box[1] - fb)
+        if box[1] < need:
+            bad.setdefault(name, (name, t, box[1], need))
+        halo = [h[1] for h in frames[i]['caption_halo'] if any(overlap(h, b) for b in steady)]
+        if halo and min(halo) < need:
+            r = info.setdefault(name, dict(NO_SPILL))
+            r['halo_px'] = max(r['halo_px'], need - min(halo))
+    return list(bad.values()), margin, info
 
 
 def missing_text(page, phrases):
@@ -369,17 +543,48 @@ def main():
     if problems:
         fails.append('provenance: ' + '; '.join(problems))
 
+    report['openings'], lines = openings_report(proj, segs)
+    for ln in lines:
+        print(ln)
+
+    render = arg('--render')
+    frames, why = overlay_frames(render, arg('--overlays', os.path.join(proj, 'work', 'overlays')))
+    report['overlay_mask'] = {'frames': len(frames or []), 'alpha_over': ALPHA, 'min_area': MIN_AREA, 'problem': why}
+    print(f'overlay mask: {len(frames)} frames, alpha > {ALPHA}, regions of {MIN_AREA}px or more' if frames else f'overlay mask: NOT MEASURED ({why})')
+    if frames:
+        with open(os.path.join(proj, 'work', 'overlay-boxes.json'), 'w', encoding='utf-8') as fh:
+            json.dump(frames, fh)
+
     lim = float(arg('--max-onset-err', .15))
     stem = (pcm16k(os.path.join(proj, 'assets', 'aroll.mp4')), 16000)
-    errs = caption_errors(segs, words, stem, page)
-    print('sentence   onset(film) caption err')
-    for sid, on, e in errs:
-        print(f'{sid:10s} {on:9.3f}  {e:+.3f}')
-    worst = max(abs(e) for _, _, e in errs)
-    print(f'caption onset: mean |err| {sum(abs(e) for _, _, e in errs) / len(errs):.3f}s  worst {worst:.3f}s  n={len(errs)}  (limit {lim})')
-    report['caption_onset'] = {'errors': {sid: round(e, 3) for sid, _, e in errs}, 'worst': round(worst, 3), 'limit': lim}
-    if worst > lim:
-        fails.append(f'caption onset worst {worst:.3f}s > {lim}s')
+    if frames:
+        shown = caption_shown(frames, segs)
+        errs = caption_errors(segs, words, (pcm16k(render), 16000), shown)
+        print('sentence   onset(film) shown   err')
+        for g, (sid, on, e) in enumerate(errs):
+            print(f'{sid:10s} {on:9.3f}  ' + (f'{shown[g]:6.3f}  {e:+.3f}' if e is not None else 'NEVER SHOWN'))
+        timed = [abs(e) for _, _, e in errs if e is not None]
+        never = [sid for sid, _, e in errs if e is None]
+        worst = max(timed or [0])
+        print(f'caption onset (rendered frames vs the render\'s audio): mean |err| {sum(timed) / max(1, len(timed)):.3f}s  worst {worst:.3f}s  '
+              f'n={len(timed)}  (limit {lim})' + (f'  NEVER SHOWN {never}' if never else ''))
+        report['caption_onset'] = {'errors': {sid: None if e is None else round(e, 3) for sid, _, e in errs},
+                                   'shown': {segs[g]['id']: None if t is None else round(t, 3) for g, t in shown.items()},
+                                   'speech': {sid: round(on, 3) for sid, on, _ in errs}, 'worst': round(worst, 3), 'limit': lim}
+        late = onset_failure(errs, lim)
+        if late:
+            fails.append(late)
+        if never:
+            fails.append(f'caption never shown in its segment: {never}')
+        missing = caption_presence(frames, layout, segs)
+        report['caption_presence'] = {'captions': sum(e['kind'] == 'caption' for e in layout), 'never_shown': missing}
+        print(f"caption presence: {report['caption_presence']['captions'] - len(missing)}/{report['caption_presence']['captions']} "
+              'captions shown on the render in their planned span' + (f'  NEVER SHOWN {missing}' if missing else ''))
+        if missing:
+            fails.append(f'captions never shown on the render (element: sentence): {missing}')
+    else:
+        report['caption_onset'] = report['caption_presence'] = {'not_measured': why}
+        fails += [f'caption onset NOT MEASURED: {why}', f'caption presence NOT MEASURED: {why}']
 
     dur = len(stem[0]) / 2 / 16000
     short = {c: round(v, 3) for c, v in chunk_holds(page, dur).items() if v < MIN_HOLD}
@@ -405,19 +610,40 @@ def main():
         if bad:
             fails.append(bad)
 
-    outside = [e['id'] for e in layout if not inside(zone, e['box'])]
-    report['safe_zone'] = {'boxes': len(layout), 'outside': outside}
-    print(f'safe zone ({built["platform"]}): {len(layout) - len(outside)}/{len(layout)} boxes inside')
-    if outside:
-        fails.append(f'outside the safe zone: {outside}')
-
-    if os.path.exists(os.path.join(proj, 'faces.json')):
-        bad = face_clearance(layout, segs, load('faces.json'))
-        report['face_clearance'] = {'captions': sum(e['kind'] == 'caption' for e in layout), 'too_close': bad}
-        print(f"face clearance: {report['face_clearance']['captions'] - len(bad)}/{report['face_clearance']['captions']} captions "
-              f'at least {FACE_MARGIN}px under the face on every sampled frame, or on the chest band' + (f'  TOO CLOSE {bad}' if bad else ''))
+    if frames:
+        outside, info = safe_zone(frames, zone, layout)
+        steady = [b for f in frames for b in f['ink'] if settled(b, f['t'], layout)]
+        closest = min([zone_margin(zone, b) for b in steady] or [None])
+        report['safe_zone'] = {'frames': len(frames), 'ink_boxes': sum(len(f['ink']) for f in frames), 'settled_ink_boxes': len(steady),
+                               'closest_px': closest, 'outside': {k: {'t': round(t, 3), 'box': b} for k, (t, b) in outside.items()},
+                               'info': info}
+        halo = {k: v['halo_px'] for k, v in info.items() if v['halo_px']}
+        moved = {k: (v['spill_px'], v['spill_frames']) for k, v in info.items() if v['spill_frames']}
+        print(f'safe zone ({built["platform"]}, rendered ink on settled frames): {len(steady)} boxes, {len(outside)} elements outside, '
+              f'closest {closest}px from the zone edge' + (f'  OUTSIDE {report["safe_zone"]["outside"]}' if outside else ''))
+        print(f'  info, not failures: text-shadow halo past the zone {halo or "none"}; ink past it during fades (px, frames) {moved or "none"}')
+        if outside:
+            fails.append(f'outside the safe zone: {report["safe_zone"]["outside"]}')
+        stray = unexplained_ink(frames, layout)
+        report['ink_timing'] = {'unexplained': {k: {'t': round(t, 3), 'box': b} for k, (t, b) in stray.items()}}
+        print(f'ink timing: {len(stray)} elements on screen outside their planned span (+-1 frame)' + (f'  {report["ink_timing"]["unexplained"]}' if stray else ''))
+        if stray:
+            fails.append(f'ink on screen outside its planned span: {report["ink_timing"]["unexplained"]}')
+        faces = film_faces(render)
+        bad, margin, info = face_clearance(frames, segs, faces, layout)
+        seen = [i for i in faces if i < len(frames) and frames[i]['caption']]
+        report['face_clearance'] = {'sampled': len(faces), 'faces_found': sum(v is not None for v in faces.values()),
+                                    'sampled_with_captions': len(seen), 'closest': margin, 'too_close': bad, 'info': info}
+        halo = {k: v['halo_px'] for k, v in info.items() if v['halo_px']}
+        moved = {k: (v['spill_px'], v['spill_frames']) for k, v in info.items() if v['spill_frames']}
+        print(f'face clearance (YuNet on rendered frames, settled caption ink): {len(seen)} sampled frames show captions, {len(bad)} captions fail '
+              f'(top {FACE_MARGIN}px under the face found on the frame, never above y{CHEST_TOP}); closest {margin}' + (f'  TOO CLOSE {bad}' if bad else ''))
+        print(f'  info, not failures: text-shadow halo past that line {halo or "none"}; ink past it during fades (px, frames) {moved or "none"}')
         if bad:
             fails.append(f'captions over the face: {bad}')
+    else:
+        report['safe_zone'] = report['face_clearance'] = {'not_measured': why}
+        fails += [f'safe zone NOT MEASURED: {why}', f'face clearance NOT MEASURED: {why}']
 
     if arg('--expect-text'):
         with open(arg('--expect-text'), encoding='utf-8') as fh:
@@ -428,7 +654,6 @@ def main():
         if miss:
             fails.append(f'missing text: {miss}')
 
-    render = arg('--render')
     if render:
         d = float(subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', render],
                                  **skillenv.TEXT).stdout.strip())
@@ -474,4 +699,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    skillenv.main_or_3(main)
