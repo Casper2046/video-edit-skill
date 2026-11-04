@@ -7,3 +7,4 @@ assets/template/assets/sfx/*.part
 *.log
 .DS_Store
 node_modules/
+.models/

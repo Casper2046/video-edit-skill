@@ -183,7 +183,7 @@ class Setup(unittest.TestCase):
             self.assertNotIn('apt', f)
 
     def test_requirements_are_the_hotfix_pins(self):
-        self.assertEqual(setup.REQUIREMENTS, ['faster-whisper==1.2.1', 'av>=11,<19', 'pillow'])
+        self.assertEqual(setup.REQUIREMENTS, ['faster-whisper==1.2.1', 'av>=11,<19', 'pillow', 'onnxruntime>=1.14,<2', 'numpy'])
 
     def test_python_39_is_not_refused(self):
         self.assertEqual(skillenv.OLDEST_PY, (3, 9))   # system Python on many Macs; the old setup.sh accepted it

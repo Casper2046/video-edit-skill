@@ -2,31 +2,36 @@
 """Spec mode: build <project>/index.html (HyperFrames) from the reel spec, a look pack and a platform safe zone.
 
 Usage:  PY build_reel.py <project_dir> [--look NAME] [--platform NAME] [--safe]
-Reads reel.json, segments.json (assemble.py), words_cN.json (ingest.py), words.json (transcribe_cut.py) and
-assets/aroll.mp4. Writes index.html, layout.json (every caption and card box with its time span) and build-report.json.
+Reads reel.json, segments.json (assemble.py), words_cN.json (ingest.py), words.json (transcribe_cut.py),
+faces.json (faces.py: caption_top for shots whose spec gives none) and assets/aroll.mp4. Writes index.html, layout.json (every caption and card box with its time span) and build-report.json.
 
 Captions say the narration's words; their times come from medium.en on the cut, aligned back to the narration, and
 fall back to the shot's own words (docs: timing from the cut, spelling from the narration). Font sizes are fitted with
 the real font files, and every box is checked against the platform's safe zone: a box outside it is an error.
 --safe draws the unsafe area in red (snapshots only, never render with it).
 """
+import array
 import html
 import json
 import math
 import os
+import re
 import subprocess
 import sys
+import wave
 
 from PIL import ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
-from edl_from_words import align, norm  # noqa: E402
+from edl_from_words import align, norm, room_floor  # noqa: E402
+from faces import caption_top  # noqa: E402
 
 SK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONTS = os.path.join(SK, 'assets', 'template', 'assets', 'fonts')
 W, H, FPS = 1080, 1920, 30
 LEAD = .05      # a caption chunk appears this long before its first word
+MIN_HOLD = .30  # every caption chunk stays at full opacity at least this long
 END_GAP = .25   # the end card takes over this long after the last word
 # outer margins + an extra right margin (width, from y) for the action-button column. Sources: references/layout.md
 PLATFORMS = {
@@ -38,6 +43,7 @@ LABEL = {'size': 34, 'lh': 41, 'ls': .24}    # step labels (tracked caps)
 CHIP = {'size': 30, 'lh': 64, 'ls': .16, 'pad': 48, 'gap': 14}
 MSG = {'left': 110, 'right': 970, 'h': 120, 'size': 36, 'pad': 60}
 WHOOSH = ('whoosh-short', .57, .18)
+PUNCH_S = .32   # how long the look's cut punch scales the picture (reel_check skips these frames for picture sync)
 GSAP_URL = 'https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js'
 GSAP_LOCAL = 'assets/vendor/gsap.min.js'   # make_reel.py puts a hash-checked copy here so renders need no network
 SFX_GAIN = 0.75
@@ -122,19 +128,30 @@ def line(text, st, top, z, maxw):
             'box': [round(cx - w / 2), math.floor(top + min(0, i0)), round(cx + w / 2), math.ceil(top + max(h, i1))]}
 
 
+MIN_STACK_SCALE = .85   # a stack may shrink this far to fit before its lines go one at a time
+
+
 def block(items, top0, z, maxw):
-    """stacked lines at top0; if the stack crosses the safe bottom, one line at a time; if that still crosses, move
-    up until it fits. items: [(text, style)]. Returns (mode, lines, warning)"""
+    """stacked lines at top0; if the stack crosses the safe bottom, the same stack up to 15% smaller; then one line at a
+    time; if that still crosses, move up until it fits. items: [(text, style)]. Returns (mode, lines, warning)"""
     floor = H - z['bottom']
-    for mode in ('stack', 'replace'):
+
+    def stack(scale):
         lines, top = [], top0
         for text, st in items:
-            lines.append(line(text, st, top, z, maxw))
-            if mode == 'stack':
-                top += lines[-1]['h']
-        bottom = max(ln['box'][3] for ln in lines)
-        if bottom <= floor:
-            return mode, lines, None
+            lines.append(line(text, {**st, 'size': math.floor(st['size'] * scale), 'lh': st['lh'] * scale}, top, z, maxw))
+            top += lines[-1]['h']
+        return lines
+    scale = 1.0
+    while scale >= MIN_STACK_SCALE:
+        lines = stack(scale)
+        if max(ln['box'][3] for ln in lines) <= floor:
+            return 'stack', lines, None
+        scale = round(scale - .01, 2)
+    lines = [line(text, st, top0, z, maxw) for text, st in items]
+    bottom = max(ln['box'][3] for ln in lines)
+    if bottom <= floor:
+        return 'replace', lines, None
     shift = bottom - floor
     lines = [line(text, st, top0 - shift, z, maxw) for text, st in items]
     return 'replace', lines, f'moved up {shift}px from y{top0} to fit above y{floor} (check it does not cover the face)'
@@ -151,6 +168,14 @@ def default_chunks(n):
     return [[s, 'sm'] for s in sizes] + [[emph, 'md y']]
 
 
+def font_faces():
+    """the template's @font-face rules, inline and pointing at assets/fonts: the HyperFrames compiler only counts fonts
+    declared in the page itself (a <link>ed fonts.css made it warn "No deterministic font mapping" on every render)"""
+    with open(os.path.join(FONTS, 'fonts.css'), encoding='utf-8') as fh:
+        rules = fh.read()
+    return re.sub(r"url\('([^'/]+\.woff2)'\)", r"url('assets/fonts/\1')", rules).strip()
+
+
 def tween_in(eid, t, frm, to, dur, ease):
     return (f"gsap.set('#{eid}',{{autoAlpha:0}});"
             f"tl.fromTo('#{eid}',{{autoAlpha:0,{frm}}},{{autoAlpha:1,{to},duration:{dur},ease:'{ease}',immediateRender:false}},{t:.3f});")
@@ -160,8 +185,35 @@ def tween_out(eid, t, dur, extra=''):
     return f"tl.to('#{eid}',{{autoAlpha:0,{extra}duration:{dur}}},{t - dur:.3f});tl.set('#{eid}',{{autoAlpha:0}},{t:.3f});"
 
 
-def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(), gsap=GSAP_URL):
-    """-> (html, layout, report). words: per-shot word lists by clip id; cut_words: medium.en on the cut."""
+def speech_start(pcm, sr, src_in, first_word):
+    """Where a sentence's first word is audible in its shot (16-bit mono PCM): Whisper hangs the pause before a word on
+    that word. 25ms RMS every 10ms; speech = 30% of the way from the floor to the peak (5th/95th percentile, -1..+1.2s
+    around the word), held 50ms after >=100ms below it (or from the clip start). Never before the segment's in point."""
+    x, n = array.array('h', pcm), int(sr * .025)
+    lo, hi = max(0, int((first_word - 1) * 100)), int((first_word + 1.2) * 100)
+    env = [20 * math.log10(math.sqrt(sum(v * v for v in x[k:k + n]) / n) / 32768 + 1e-9) for k in range(lo * sr // 100, min(len(x) - n, hi * sr // 100), sr // 100)]
+    if not env:
+        return first_word
+    ranked = sorted(env)
+    floor = room_floor(env)                     # digital silence is not the room when the shot has room tone
+    level = floor + .3 * (ranked[-1 - len(ranked) // 20] - floor)
+    start = int(max(src_in, first_word - .3) * 100)
+    quiet = 10 if start == 0 else 0
+    for i in range(max(lo, start - 10), lo + len(env) - 5):
+        held = all(v >= level for v in env[i - lo:i - lo + 5])
+        if env[i - lo] < level:
+            quiet += 1
+        elif held and quiet >= 10 and i >= start - 2:
+            return max(src_in, i / 100)
+        elif held:
+            quiet = 0
+    return first_word
+
+
+def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(), gsap=GSAP_URL, faces=None, onsets=None):
+    """-> (html, layout, report). words: per-shot word lists by clip id; cut_words: medium.en on the cut;
+    faces: faces.json ({clip: {face_bottom}}) for shots without a caption_top in the spec;
+    onsets: {segment index: speech onset in the source shot} (speech_onset): a sentence's first word starts there."""
     if platform not in PLATFORMS:
         raise SpecError(f'unknown platform "{platform}" (have {sorted(PLATFORMS)})')
     z, maxw, warn = PLATFORMS[platform], look['max_width'], []
@@ -181,6 +233,8 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
     from_cut = {f: cut_words[i]['start'] for f, i in zip(flat, cut_ix) if i is not None}
 
     def word_t(g, j):
+        if j == 0 and g in (onsets or {}):
+            return src_to_cut(g, onsets[g])
         t = from_cut.get((g, j))
         if t is not None and T[g] - .02 <= t < seg_end(g):
             return t
@@ -209,6 +263,16 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
         return {'lower': t.lower(), 'upper': t.upper()}.get(look.get('case'), t)
 
     out_html, tw, layout, modes = [], [], [], {}
+    tops = {}
+    for k, shot in enumerate(spec['shots']):
+        cid = f'c{k + 1}'
+        if 'caption_top' in shot:
+            tops[cid] = [shot['caption_top'], 'spec']
+        else:
+            low = (faces or {}).get(cid, {}).get('face_bottom')
+            tops[cid] = [caption_top(low, platform), 'auto' if low is not None else 'default']
+            if low is None:
+                warn.append(f'{cid}: no caption_top and no face found: captions start at the chest band')
 
     # captions: one block per sentence, chunk by chunk on the spoken word
     for g, seg in enumerate(segs):
@@ -216,7 +280,7 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
         chunks = over[g].get('chunks') or default_chunks(len(toks))
         if sum(c for c, _ in chunks) != len(toks):
             raise SpecError(f'sentence {seg["id"]}: chunks cover {sum(c for c, _ in chunks)} words, it has {len(toks)}: {seg["line"]}')
-        top0 = spec['shots'][int(seg['clip'][1:]) - 1].get('caption_top', 1000)
+        top0 = tops[seg['clip']][0]
         items, starts, i = [], [], 0
         for cnt, cls in chunks:
             items.append((case(' '.join(toks[i:i + cnt])), style(look, cls), cls))
@@ -227,6 +291,20 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
         if w:
             warn.append(f'{seg["id"]}: {w}')
         b = end_t if g == n - 1 else seg_end(g)
+        last = len(starts) - 1
+        for k in range(last, 0, -1):     # later chunks come in early enough to stay readable; the first stays on the onset
+            gone = b - .12 if mode == 'stack' or k == last else starts[k + 1] - .08
+            if starts[k] > gone - .2 - MIN_HOLD:
+                starts[k] = max(gone - .2 - MIN_HOLD, starts[k - 1] + (.05 if mode == 'stack' else .2 + MIN_HOLD + .08))
+        if mode == 'replace':            # one line at a time: a line waits until the one before it has been readable
+            for k in range(1, len(starts)):
+                starts[k] = max(starts[k], starts[k - 1] + .2 + MIN_HOLD + .08)
+        for k, t in enumerate(starts):
+            gone = b if mode == 'stack' or k == last else max(t + .2, starts[k + 1])
+            full = (dur if gone >= dur - .01 else gone - (.12 if gone == b else .08)) - t - .2
+            if full < MIN_HOLD - 1e-6:
+                warn.append(f'{seg["id"]}: caption shown only {max(full, 0):.2f}s at full opacity (chunk {k + 1}); '
+                            f'the sentence is too short for its words')
         for k, ((text, _, cls), ln, t) in enumerate(zip(items, lines, starts)):
             eid = f'w{g}-{k}'
             out_html.append(f'<div id="{eid}" class="dw {cls}" style="left:{ln["left"]}px;width:{ln["width"]}px;top:{ln["top"]}px;'
@@ -316,7 +394,7 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
     # grade, cut punch, a whoosh where the shot changes
     grade = [f"gsap.set('.g',{{filter:'{look['grade']}'}});"]
     if look.get('cut_punch', 1) > 1:
-        grade += [f"tl.fromTo('#stage',{{scale:{look['cut_punch']}}},{{scale:1,duration:.32,ease:'power2.out',immediateRender:false}},{t:.3f});"
+        grade += [f"tl.fromTo('#stage',{{scale:{look['cut_punch']}}},{{scale:1,duration:{PUNCH_S},ease:'power2.out',immediateRender:false}},{t:.3f});"
                   for t in T[1:]]
     audio = []
     if WHOOSH[0] in sfx:
@@ -327,11 +405,11 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
     elif n > 1:
         warn.append('no assets/sfx/whoosh-short.mp3: shot changes have no whoosh')
 
-    page = PAGE.format(gsap=gsap, css=css(look), dur=f'{dur:.3f}', audio='\n'.join(audio),
+    page = PAGE.format(gsap=gsap, fonts=font_faces(), css=css(look), dur=f'{dur:.3f}', audio='\n'.join(audio),
                        layers=''.join(f'<div id="fx{k}" class="fx"></div>' for k in range(len(look['layers']))),
                        body='\n'.join(out_html), guide=guide(z) if safe else '', tl='\n'.join(grade + tw))
     report = {'look': spec.get('_look'), 'platform': platform, 'duration': round(dur, 3), 'end_t': round(end_t, 3),
-              'cuts': [round(t, 3) for t in T[1:]], 'caption_modes': modes, 'warnings': warn}
+              'cuts': [round(t, 3) for t in T[1:]], 'caption_tops': tops, 'caption_modes': modes, 'warnings': warn}
     return page, layout, report
 
 
@@ -376,7 +454,9 @@ PAGE = '''<!doctype html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=1080, height=1920" />
-<link rel="stylesheet" href="assets/fonts/fonts.css" />
+<style>
+{fonts}
+</style>
 <script src="{gsap}"></script>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
@@ -433,7 +513,15 @@ def main():
     sfx_dir = os.path.join(proj, 'assets', 'sfx')
     sfx = {f[:-4] for f in os.listdir(sfx_dir) if f.endswith('.mp3')} if os.path.isdir(sfx_dir) else set()
     gsap = GSAP_LOCAL if os.path.exists(os.path.join(proj, GSAP_LOCAL)) else GSAP_URL
-    page, layout, report = build(spec, look, platform, segs, words, cut_words, dur, safe='--safe' in sys.argv, sfx=sfx, gsap=gsap)
+    faces = load('faces.json') if os.path.exists(os.path.join(proj, 'faces.json')) else None
+    onsets = {}
+    for g, s in enumerate(segs):
+        wav, wi = os.path.join(proj, 'work', f"{s['clip']}.wav"), s['word_idx'][0]
+        if wi is not None and os.path.exists(wav):
+            with wave.open(wav) as fh:
+                onsets[g] = speech_start(fh.readframes(fh.getnframes()), fh.getframerate(), s['src_in'], words[s['clip']][wi]['start'])
+    page, layout, report = build(spec, look, platform, segs, words, cut_words, dur, safe='--safe' in sys.argv, sfx=sfx, gsap=gsap,
+                                 faces=faces, onsets=onsets)
     if not cut_words:
         report['warnings'].append('no words.json (transcribe_cut.py): caption times come from the per-shot words only')
     with open(os.path.join(proj, 'index.html'), 'w', encoding='utf-8', newline='\n') as fh:

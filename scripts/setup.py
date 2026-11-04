@@ -114,7 +114,7 @@ def base_python():
 # Versions are pinned so a new upstream release cannot break installs (same pins as the setup.sh hotfix). PyAV 19
 # (2026-09-29) removed the `metadata_errors` argument that faster-whisper 1.2.1 still passes, so every transcription
 # crashed on fresh installs. A venv that already has PyAV 19 fails the self-test below and is repaired in place.
-REQUIREMENTS = ['faster-whisper==1.2.1', 'av>=11,<19', 'pillow']
+REQUIREMENTS = ['faster-whisper==1.2.1', 'av>=11,<19', 'pillow', 'onnxruntime>=1.14,<2', 'numpy']
 # imports alone did not catch the PyAV break: decode a tenth of a second of silence the way a transcription does
 VENV_SELFTEST = r'''
 import os, tempfile, wave

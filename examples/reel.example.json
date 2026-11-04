@@ -5,11 +5,9 @@
  "names": "",
  "shots": [
   {"file": "shots/shot1.mp4",
-   "narration": "Feeling stuck on a busy day? Here is a two minute reset. Try it with me.",
-   "caption_top": 1050},
+   "narration": "Feeling stuck on a busy day? Here is a two minute reset. Try it with me."},
   {"file": "shots/shot2.mp4",
-   "narration": "Breathe in slowly. Name three things you can see. Now pick one small task.",
-   "caption_top": 1050}
+   "narration": "Breathe in slowly. Name three things you can see. Now pick one small task."}
  ],
  "sentences": [
   {"id": "hook", "hold": 0},
