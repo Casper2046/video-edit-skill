@@ -75,7 +75,7 @@ def main():
         n = max(1, min(round((s['out'] - s['in']) * 30), int((length(f) - s['in']) * 30 + 1e-6)))   # never past the shot's end
         nxt = edl[k + 1] if k + 1 < len(edl) else None
         fade_out = not (nxt and nxt['clip'] == s['clip'] and abs(s['out'] - nxt['in']) < .001)
-        out = os.path.join(work, f'seg_{k}.mp4')
+        out = os.path.join(work, f'seg_{k}.mov')      # .mov: FFmpeg before 6.1 (Debian 12's 5.1) cannot put PCM in .mp4
         # vertical fill: scale to cover 1080x1920 then centre-crop (handles 4K 9:16 and odd phone sizes)
         # Picture frame k must show the source at in + k/30, the same moment as the sound. Seek a whole number of 30fps
         # frames early, lay the 30fps grid from the seek point (fps start_time=0), then drop exactly those frames and that

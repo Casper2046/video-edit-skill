@@ -7,9 +7,12 @@ What lives here:
   venv_python()       where the skill's Python lives (.venv/bin on macOS / Linux, .venv\\Scripts on Windows)
   find_tool()         ffmpeg / ffprobe / node, on PATH or in the usual install folders
   npx_command()       how to start npx without a shell (on Windows `npx` is npx.cmd, so a bare name fails)
-  run_hyperframes()   npx --yes hyperframes@<pinned> ... with the right Node first on PATH
+  run_hyperframes()   the installed pinned hyperframes (render image), else npx --yes hyperframes@<pinned>, with the
+                      right Node first on PATH
   load()              reads <skill>/.platform.json, written by setup.py, so nothing is detected twice
   path_arg(), utf8_stdio(), concat_entry(), safe_name()   small things every script needs on Windows
+  video_fps()         a video's frame rate (ffprobe)
+  main_or_3()         runs a script's main(); an uncaught exception exits 3 (a crash), never 1 (a failed QA check)
 """
 import glob
 import json
@@ -308,6 +311,28 @@ def tool(name):
     return find_tool(name)[0] or name
 
 
+def video_fps(path):
+    """frame rate of the first video stream"""
+    rate = subprocess.run([tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate',
+                           '-of', 'csv=p=0', path], **TEXT).stdout.strip().split(',')[0]
+    num, den = (rate.split('/') + ['1'])[:2]
+    return float(num) / float(den)
+
+
+CRASH = 3   # exit codes: 0 pass, 1 a QA check failed, 2 input refused, 3 a pipeline stage failed or crashed
+
+
+def main_or_3(main):
+    """main(), with an uncaught exception printed and turned into exit CRASH: Python's own exit 1 would read as a
+    failed QA check"""
+    try:
+        main()
+    except Exception:              # SystemExit and KeyboardInterrupt are not Exceptions: they pass through
+        import traceback
+        traceback.print_exc()
+        sys.exit(CRASH)
+
+
 def hyperframes_env(node=None, ffmpeg=None, environ=None, pathsep=os.pathsep, dirname=os.path.dirname):
     """Environment for a HyperFrames run: the chosen Node and ffmpeg folders first on PATH, anonymous usage
     telemetry off unless the user set it themselves."""
@@ -323,18 +348,47 @@ def hyperframes_env(node=None, ffmpeg=None, environ=None, pathsep=os.pathsep, di
     return env
 
 
+def _hyperframes_version(path):
+    try:
+        out = subprocess.run([path, '--version'], timeout=60, env=hyperframes_env(), **TEXT).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    m = re.search(r'\d+\.\d+\.\d+', out or '')
+    return m.group(0) if m else ''
+
+
+def installed_hyperframes(environ=None, find=None, version=None):
+    """-> path of an installed hyperframes to run instead of `npx --yes` (which downloads), or None.
+    VIDEO_EDIT_HYPERFRAMES (the render image sets it) wins. A hyperframes on PATH is used only at the pinned version:
+    a Mac can have a newer global one, and renders stay on the pin."""
+    environ = os.environ if environ is None else environ
+    named = environ.get('VIDEO_EDIT_HYPERFRAMES')
+    if named:
+        if not os.path.isfile(named):
+            raise SystemExit(f'VIDEO_EDIT_HYPERFRAMES={named} is not a file')
+        return named
+    path = (find or find_tool)('hyperframes')[0]
+    if path and (version or _hyperframes_version)(path) == HYPERFRAMES.split('@')[1]:
+        return path
+    return None
+
+
 def hyperframes_command(args):
-    """-> (argv, env) for `npx --yes hyperframes@<pinned> <args>`."""
+    """-> (argv, env) for an installed pinned hyperframes, else `npx --yes hyperframes@<pinned> <args>`."""
     rec = load()
     if rec.get('node') and rec.get('npx') and all(os.path.isfile(p) for p in [rec['node']] + rec['npx']):
         node, npx = os.path.normpath(rec['node']), [os.path.normpath(p) for p in rec['npx']]   # .json keeps / on Windows
     else:
         node = find_node()[0]
         npx = npx_command(node)
+    ffmpeg = tool('ffmpeg')
+    env = hyperframes_env(node, ffmpeg if os.path.isabs(ffmpeg) else None)
+    hf = installed_hyperframes()
+    if hf:
+        return [hf] + list(args), env
     if not npx:
         raise SystemExit(f'Node.js {MIN_NODE}+ (npx) not found. Run setup.py in the skill folder and follow its fix.')
-    ffmpeg = tool('ffmpeg')
-    return npx + ['--yes', HYPERFRAMES] + list(args), hyperframes_env(node, ffmpeg if os.path.isabs(ffmpeg) else None)
+    return npx + ['--yes', HYPERFRAMES] + list(args), env
 
 
 def run_hyperframes(args, cwd=None):

@@ -4,7 +4,8 @@
 Usage:  PY faces.py <project_dir>
 Reads sources.json; writes faces.json {"c1": {"face_bottom": 987, "box": [x0, y0, x1, y1], "frames": 52, "sampled": 56,
 "samples": [{"t": 0.0, "face_bottom": 981}, ...]}, ...} in 1080x1920 frame coordinates (the same cover-crop assemble.py
-uses). Every STEP-th frame of the shot is sampled (5 frames a shot missed a lean-in); "samples" keeps each one, with
+uses). Every frame of the shot is sampled (STEP 1: every 5th frame missed a lean-in, and every 3rd missed a one-frame
+face-bottom spike that the render check then found on a rendered frame of a held-out episode); "samples" keeps each one, with
 face_bottom None where no face was found, so reel_check can hold every caption FACE_MARGIN under every sampled frame.
 face_bottom is the lowest face bottom over the samples: the face box's bottom, or 60px under a landmark chin estimate if that is lower
 (on 4 test shots YuNet's box ended 48-96px below the landmark chin estimate, near the hair ends; the landmark guard
@@ -24,9 +25,11 @@ import skillenv  # noqa: E402
 
 CHIN_CLEAR = 60   # px kept clear under the landmark chin estimate
 FACE_MARGIN = 20  # px between the lowest face bottom and the caption top (0px let captions touch the jaw)
+RENDER_HEADROOM = 3   # px more when planning: on rendered frames reel_check found face bottoms up to 3px below the
+                      # lowest faces.py found on the source frames (a held-out episode)
 CHEST_TOP = 940   # captions never start higher than the chest band (references/layout.md)
 LINE = 86         # one small caption line must still fit above the safe bottom
-STEP = 3          # sample every 3rd frame
+STEP = 1          # sample every frame: each rendered frame is resampled from one of them
 MIN_SCORE = .6
 MODEL = ('face_detection_yunet_2023mar.onnx', '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4',
          'https://media.githubusercontent.com/media/opencv/opencv_zoo/f12e12798e8314f7c074a6656816c048dcc95b7a/'
@@ -38,7 +41,7 @@ W, H, SIDE = 1080, 1920, 640   # frame, and the detector's square input (the fra
 def caption_top(face_bottom, platform):
     """first caption line's top for a shot whose lowest face bottom is at y `face_bottom` (None = no face found)"""
     from build_reel import PLATFORMS
-    top = CHEST_TOP if face_bottom is None else max(round(face_bottom) + FACE_MARGIN, CHEST_TOP)
+    top = CHEST_TOP if face_bottom is None else max(round(face_bottom) + FACE_MARGIN + RENDER_HEADROOM, CHEST_TOP)
     return min(top, H - PLATFORMS[platform]['bottom'] - LINE)
 
 
@@ -103,10 +106,7 @@ def frames(f, step=STEP):
     """[(t, 640x640 BGR input)] for the sampled frames (sample_frames): cover-cropped to 1080x1920 like assemble.py,
     scaled 1/3 and padded into the detector's square input. One decode per shot."""
     import numpy as np
-    rate = subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate',
-                           '-of', 'csv=p=0', f], **skillenv.TEXT).stdout.strip().split(',')[0]
-    num, den = (rate.split('/') + ['1'])[:2]
-    fps = float(num) / float(den)
+    fps = skillenv.video_fps(f)
     raw = subprocess.run([skillenv.tool('ffmpeg'), '-loglevel', 'error', '-i', f, '-vf',
                           'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,scale=360:640',
                           '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True, check=True).stdout

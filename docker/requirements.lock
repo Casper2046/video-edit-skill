@@ -1,0 +1,29 @@
+# The render image venv (Python 3.11, linux arm64 + amd64): setup.py REQUIREMENTS and everything they pull in,
+# pinned with the sha256 of each wheel (two hashes where the wheel differs per architecture).
+# Resolved 2026-11-05: pip install --dry-run --report --python-version 3.11 --only-binary=:all:
+#   --platform manylinux_2_17..2_36_{aarch64,x86_64} 'faster-whisper==1.2.1' 'av>=11,<19' 'pillow' 'onnxruntime>=1.14,<2' 'numpy'
+# Installed with: pip install --require-hashes --no-deps -r requirements.lock
+anyio==4.16.0 --hash=sha256:c66ae634e0b8228396b801741beb3294326d4b6102f7bba4041c0dfb58c29026
+av==18.1.0 --hash=sha256:6fc837cc51adf80331ac850779cd53b5d4c4460b0ebe9057a02a921c6736f19d --hash=sha256:8a032e8d8ebc73dec079364b9b4a6837638a2d106e8472314e685ffbf163e700
+click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+ctranslate2==4.8.5 --hash=sha256:79a30a2c974530dbb5083f4922d28ffad87e08542f423aa91c53fbf4543cc35f --hash=sha256:d24a3f2853d3d11c0f14dc418dd7436cef3c9874ccf704e90ba23305e35145e7
+faster-whisper==1.2.1 --hash=sha256:79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7
+filelock==4.2.8 --hash=sha256:c2be657e2c279cb032af8e4ea8ce2e20aa982e540be77fcaa34910d068ac2510
+flatbuffers==25.12.19 --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
+fsspec==2026.9.0 --hash=sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f
+h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+hf-xet==1.8.0 --hash=sha256:29dab7c904cd1914a0439c6e1306c12c7497c8bd32290fbe563ebf51ca4b6d6d --hash=sha256:8800e3444770f2c630b361bc6d5c6ebb770b7830646cf632fbb79d0e5bbc9e7f
+httpcore2==2.16.0 --hash=sha256:5c4358319f2602d984ad93182c9fee5160f22e9da7babdda870a5e7c4e2dc34f
+httpx2==2.16.0 --hash=sha256:fd2c5d7909e8d86fe92d53020c310ca0e4e431b838c207c5754b9bbf0308d49a
+huggingface_hub==2.4.0 --hash=sha256:42ecfd93ede47bdd333daebbf66a32d7bfe2e18752754fe4d2d4f98a0179d801
+idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+numpy==2.4.6 --hash=sha256:0ab0a9c4ffb1a6d95ef519fe4247dba8eb6b18ad93999f76b7f657039acabd47 --hash=sha256:89cd468399cfd2504718f0ba50e410dca55a170b61a02ad92bb18c8a65186e93
+onnxruntime==1.31.1 --hash=sha256:5752bd508126ae7c49894d3b9d2e83f0c3d487319246d04c444b393308d7ad7f --hash=sha256:da05378364c44d4407e463982d2bf8d5e4cfea873283757e48beeb41df97b7f3
+packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pillow==13.0.0 --hash=sha256:7c88c10dd432f3b39ccdafc9ed81d0c21b8fd634502574da76d1bfa4fe2c76d0 --hash=sha256:a625df9a2a5597fa5e5266e01aefc82604bb85d291e3547981e863560d75da6c
+protobuf==7.36.2 --hash=sha256:89f23aa53c24553a2416fd4fd1ec06f74fa42b14b546d8883128813f775bbfd2 --hash=sha256:e11e1f0180583a2af89db6a2ecd9e8dc40aa6d2988ca175bfd0e6d12ea72d74e
+pyyaml==6.0.3 --hash=sha256:10892704fc220243f5305762e276552a0395f7beb4dbf9b14ec8fd43b57f126c --hash=sha256:b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d
+tokenizers==0.23.3 --hash=sha256:376851d22bcf9d650a5c3090bb83e6cf9e895fbf0595369fa4cd43c1f69b5f87 --hash=sha256:ec82e80e65a862275b97c3d90b7a523df8d9519ee48aeb4e9625b2cc909274e0
+tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+truststore==0.10.5 --hash=sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c
+typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

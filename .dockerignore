@@ -1,0 +1,17 @@
+# Render image build context (docker/Dockerfile, built from the repo root). Allowlist: only what a packet run needs.
+# Left out on purpose: .git, .venv, .models (YuNet is fetched and sha-checked at build), .platform.json (a machine
+# record from the host), tests, caches, and the sound effects (their Pixabay licence forbids redistribution, and an
+# image is redistribution).
+*
+!SKILL.md
+!scripts/
+!looks/
+!assets/
+!docker/requirements.lock
+!docker/image_assets.py
+assets/overlay-examples/
+assets/template/assets/sfx/
+**/__pycache__/
+**/*.pyc
+**/.DS_Store
+**/*.log
