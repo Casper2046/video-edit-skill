@@ -94,7 +94,8 @@ def levels(pcm, sr):
 
 
 BLIP, BLIP_DB = .05, 6   # a run over the speech line shorter than this and under line + BLIP_DB is noise, not sound
-SOFT = .15               # a soft /s/, /h/ or /th/ edge lasts at most this long (measured walks: up to 0.15s)
+SOFT = .16               # a soft edge or decay lasts at most this long (measured on two episodes: up to 0.15s;
+                         # longer walks, 0.18-0.30s, ran through noise between sentences)
 
 
 def quiet_frames(db, line):
@@ -129,15 +130,16 @@ def pauses(db, line, a, b, least=.03):
 
 def soft_edges(db, line, p0, p1):
     """a pause's real edges: a soft /s/, /h/ or /th/ is quieter than the speech line but still above the room
-    (floor + 4dB), so the sound ends later and starts earlier than the line says. A walk stops after SOFT: past that
-    it is noise between sentences, not a consonant"""
+    (floor + 4dB), so the sound ends later and starts earlier than the line says. A walk longer than SOFT is noise
+    between sentences, not a consonant: that edge stays at the line"""
     quiet = line - 6
-    s, e = int(p0 * 100), int(p1 * 100)
-    s1, e1 = s + round(SOFT * 100), e - round(SOFT * 100)
-    while s < min(e, s1) and db[s] > quiet:
+    s0, e0 = round(p0 * 100), round(p1 * 100)
+    s, e = s0, e0
+    while s < e0 and db[s] > quiet:
         s += 1
-    while e > max(s, e1) and db[e - 1] > quiet:
+    while e > s0 and db[e - 1] > quiet:
         e -= 1
+    s, e = (s if s - s0 <= round(SOFT * 100) else s0), (e if e0 - e <= round(SOFT * 100) else e0)
     return (s / 100, e / 100) if e - s >= 3 else (p0, p1)
 
 

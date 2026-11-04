@@ -110,6 +110,20 @@ class Planner(unittest.TestCase):
         self.assertLessEqual(a['out'], 1.0 + .15 + .12 + .01)      # sound end + soft-edge walk + 0.12
         self.assertGreaterEqual(b['in'], 1.65 - .15 - .1 - .01)
 
+    def test_an_evenly_noisy_short_pause_is_still_cut(self):
+        # review: a 0.40s pause filled with noise just under the line was cut before the soft-edge cap and joined after
+        # it (each capped walk kept 0.15s of the noise as "soft sound", leaving too little to cut)
+        a, b = self.snap([(.5, 1.0), (1.4, 2.2)], noise=30, hum=[(1.0, 1.4)])
+        self.assertGreater(b['in'], a['out'])
+        self.assertLessEqual(a['out'], 1.0 + .12 + .01)
+
+    def test_a_soft_tail_up_to_015s_is_sound_and_a_longer_one_is_noise(self):
+        # a real decay ("noon." fading out) measured 0.15s; walks of 0.18-0.30s ran through noise between sentences
+        a, _ = self.snap([(.5, 1.0), (1.65, 2.2)], soft=[(1.0, 1.15)], noise=30)
+        self.assertGreaterEqual(a['out'], 1.15 + .1)
+        a, _ = self.snap([(.5, 1.0), (1.65, 2.2)], noise=30, hum=[(1.0, 1.18)])
+        self.assertLessEqual(a['out'], 1.0 + .12 + .01)
+
     def test_only_short_quiet_runs_over_the_line_count_as_pause(self):
         # 10ms frames at -55dB, speech line -50dB: a run of 4 frames 4dB over it is noise, 5 frames or 7dB over is sound
         def gaps(run, over):
