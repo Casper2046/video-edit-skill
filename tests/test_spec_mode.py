@@ -379,6 +379,69 @@ class SyntheticOnsets(unittest.TestCase):
         self.assertAlmostEqual(B.speech_start(pcm, sr, .5, .6), 1.0, delta=.07)
 
 
+class HeldOutFailures(unittest.TestCase):
+    """Three QA failures on a 4-shot episode the onset finders were not tuned on"""
+
+    def test_placer_ignores_digital_silence_when_finding_the_room_floor(self):
+        # a shot opened on digital silence (-95dB) to 0.28s, room tone (-68dB) to 0.44s, speech from 0.44s: the placer
+        # took the silence as its floor and called the room tone speech (0.34s, 117ms early)
+        import array
+        import random
+        rnd, sr, out = random.Random(3), 16000, array.array('h')
+        for i in range(int(2.0 * sr)):
+            t = i / sr
+            db = None if t < .28 else -68 if t < .44 else -18
+            out.append(0 if db is None else int(max(-32767, min(32767, rnd.gauss(0, 32767 * 10 ** (db / 20) / 2)))))
+        self.assertAlmostEqual(B.speech_start(out.tobytes(), sr, .2, .457), .44, delta=.03)
+
+    def test_planner_finds_room_tone_pauses_in_a_shot_with_digital_silence(self):
+        # the speech line sat 10dB above digital silence (-95dB), so room tone (-68dB) counted as sound: no pause between
+        # two sentences, no cut, and the 1.2s of dead air between them stayed in the reel
+        import array
+        import random
+        rnd, sr, out = random.Random(4), 16000, array.array('h')
+        for i in range(int(3.0 * sr)):
+            t = i / sr
+            db = None if t < .3 else -18 if t < 1.0 else -68 if t < 2.0 else -18
+            out.append(0 if db is None else int(max(-32767, min(32767, rnd.gauss(0, 32767 * 10 ** (db / 20) / 2)))))
+        db, line = E.levels(out.tobytes(), sr)
+        gaps = E.pauses(db, line, .9, 2.1)
+        self.assertTrue(any(p0 <= 1.05 and p1 >= 1.95 for p0, p1 in gaps), (round(line, 1), gaps))
+
+    def test_a_stack_a_few_px_too_tall_shrinks_instead_of_going_one_line_at_a_time(self):
+        # 'notice' (big) over 'what you're feeling.' (sm) at y1178 overflowed the Reels floor by 8px: one line at a
+        # time made the first chunk flash for 0.09s
+        look, z = B.load_look('bold'), B.PLATFORMS['reels']
+        items = [('notice', B.style(look, 'big y')), ("what you're feeling.", B.style(look, 'sm'))]
+        mode, lines, warn = B.block(items, 1178, z, 860)
+        self.assertEqual(mode, 'stack')
+        self.assertIsNone(warn)
+        self.assertLess(lines[0]['fs'], B.style(look, 'big y')['size'])
+        self.assertTrue(all(B.inside(z, ln['box']) for ln in lines))
+        self.assertLessEqual(lines[0]['box'][3], lines[1]['box'][1] + 40)      # still one block, top to bottom
+        self.assertEqual(B.block(items, 1300, z, 860)[0], 'replace')           # far too tall: shrinking stops at 85%
+
+    def test_one_line_at_a_time_waits_until_the_line_before_has_been_readable(self):
+        # 'notice' then 'what you're feeling.' 0.3s later, one line at a time: the second replaced the first at once
+        sp = spec()
+        sp['shots'][0]['caption_top'] = 1330                                     # too low to stack: one line at a time
+        sp['sentences'][1]['chunks'] = [[1, 'big y'], [5, 'sm']]
+        sp, words, _, _, segs, dur = inputs(sp)
+        page, _, rep = B.build(sp, B.load_look('bold'), 'reels', segs, words, [], dur)
+        self.assertEqual(rep['caption_modes']['relax'], 'replace')
+        holds = Q.chunk_holds(page, dur)
+        self.assertGreaterEqual(round(holds['w1-0'], 3), B.MIN_HOLD, holds)
+        self.assertNotIn('relax: caption shown only', ' '.join(rep['warnings']))
+
+    def test_picture_is_compared_above_the_captions_with_only_the_cards_masked(self):
+        # the band stopped at the highest box on screen (a step label at y236), leaving only hair and wall: unmeasurable
+        layout = [{'id': 'st0', 'kind': 'step', 'box': [100, 236, 980, 277]},
+                  {'id': 'ch0', 'kind': 'chips', 'box': [300, 300, 780, 364]},
+                  {'id': 'w0-0', 'kind': 'caption', 'box': [200, 1000, 880, 1140]},
+                  {'id': 'w1-0', 'kind': 'caption', 'box': [200, 1158, 880, 1300]}]
+        self.assertEqual(Q.picture_region(layout), (1000, [[100, 236, 980, 277], [300, 300, 780, 364]]))
+
+
 @unittest.skipUnless(HAVE_FIX, 'private real-voice onset labels: set VIDEO_EDIT_ONSET_FIXTURES')
 class OnsetReference(unittest.TestCase):
     """reel_check's speech onset vs independent labels on real generated voices (not produced by any skill code)"""
@@ -665,6 +728,10 @@ class PictureSync(unittest.TestCase):
         got = Q.picture_sync(self.ahead, self.segs[:3], self.src, 1920)
         for sid, r in got.items():
             self.assertRegex(r['reason'] or '', 'picture off', (sid, r))
+
+    def test_cards_over_the_picture_are_left_out_of_the_match(self):
+        got = Q.picture_sync(self.aroll, self.segs[:1], self.src, 1920, covered=[[0, 0, 1080, 600]])
+        self.assertIsNone(got['s0']['reason'], got['s0'])
 
     def test_frames_that_cannot_be_told_apart_fail_closed(self):
         r = Q.picture_sync(self.aroll, self.segs[3:], self.src, 1920)['s3']

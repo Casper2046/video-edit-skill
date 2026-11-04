@@ -73,11 +73,24 @@ def onset_fix(words, silences):
     return out
 
 
+DIGITAL_SILENCE = -80   # dBFS: frames below are no signal at all (padding, generated silence), not the room
+ROOM_GAP = 20           # dB under the loud frames that non-silent frames must sit to count as room tone
+
+
+def room_floor(db):
+    """5th-percentile floor of dBFS frames: digital silence is left out when the shot also has room tone (else room tone
+    would count as sound); a shot whose only quiet is digital silence keeps it as the floor"""
+    ranked, room = sorted(db), sorted(v for v in db if v > DIGITAL_SILENCE)
+    if room and room[len(room) // 20] <= ranked[-1 - len(ranked) // 20] - ROOM_GAP:
+        return room[len(room) // 20]
+    return ranked[len(ranked) // 20]
+
+
 def levels(pcm, sr):
-    """20ms RMS every 10ms in dBFS, and the speech line: the shot's 5th-percentile floor + 10dB"""
+    """20ms RMS every 10ms in dBFS, and the speech line: the shot's room floor + 10dB"""
     x, n = array.array('h', pcm), sr // 50
     db = [20 * math.log10(math.sqrt(sum(v * v for v in x[k:k + n]) / n) / 32768 + 1e-9) for k in range(0, max(1, len(x) - n), sr // 100)]
-    return db, sorted(db)[len(db) // 20] + 10
+    return db, room_floor(db) + 10
 
 
 def pauses(db, line, a, b, least=.03):

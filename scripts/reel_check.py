@@ -181,11 +181,17 @@ def band_frames(f, rows, pre=''):
     return np.frombuffer(raw, np.uint8).reshape(-1, 640, 360)[:, :rows].astype(float)
 
 
-def picture_sync(render, segs, src, band):
+def picture_region(layout):
+    """(band, covered): the picture is compared above the first caption, with the cards drawn over it left out"""
+    band = min([e['box'][1] for e in layout if e['kind'] == 'caption'] or [H])
+    return band, [e['box'] for e in layout if e['kind'] != 'caption' and e['box'][1] < band]
+
+
+def picture_sync(render, segs, src, band, covered=()):
     """{sentence id: {lo, hi, matched, n, reason}}: where each segment's picture sits against the moment its sound is at.
     Render frame k of a segment should show the source frame on screen at in + k/30; ffmpeg puts each source frame j on
     its nearest 30fps slot, so frame j is right for picture times [j/fps - 1/60, (j+1)/fps - 1/60]. Each render frame
-    (above y `band`, clear of captions and cards; not the cut punch) is matched by pixels to the source frames around
+    (above y `band`, clear of captions; `covered` boxes left out; not the cut punch) is matched by pixels to the source frames around
     it, on the PIC_MOVING pixels that move most in the segment's source range (a talking head's static background makes
     neighbouring frames look alike: whole-band matching measured 4 of 17 segments in a test run), each pixel set normalised to
     zero mean and unit variance so the look's grade does not count. Every clear match narrows the segment's offset
@@ -195,13 +201,16 @@ def picture_sync(render, segs, src, band):
     from assemble import crop, size
     rows, half = max(8, int(band / 3) - 2), .5 / 30
     rv, cache, out = band_frames(render, rows), {}, {}
+    free = np.ones((rows, 360), bool)
+    for x0, y0, x1, y1 in covered:                                 # boxes in the 1080x1920 frame, frames at 1/3 scale
+        free[max(0, int(y0 / 3) - 1):max(0, int(y1 / 3) + 2), max(0, int(x0 / 3) - 1):int(x1 / 3) + 2] = False
     for s in segs:
         f, z, cx, cy = src[s['clip']], s.get('zoom', 1), s.get('cx', .5), s.get('cy', .5)
         if (f, z, cx, cy) not in cache:
             cache[f, z, cx, cy] = (band_frames(f, rows, crop(z, cx, cy, *size(f))), video_fps(f))
         sv, fps = cache[f, z, cx, cy]
         moving = np.abs(np.diff(sv[int(s['src_in'] * fps):int(s['src_out'] * fps) + 2], axis=0)).mean(0)
-        mask = moving >= np.quantile(moving, 1 - PIC_MOVING) if moving.size else np.ones(sv.shape[1:], bool)
+        mask = (moving >= np.quantile(moving[free], 1 - PIC_MOVING)) & free if moving.size else free
 
         def norm(a):
             x = a[mask]
@@ -433,7 +442,7 @@ def main():
         print(f'audio sync: worst lag {max(abs(l) for _, l in sync):.3f}s' + (f'  OFF {late}' if late else ''))
         if late:
             fails.append(f'audio out of place: {late}')
-        pic = picture_sync(render, segs, src, min([e['box'][1] for e in layout] or [H]))
+        pic = picture_sync(render, segs, src, *picture_region(layout))
         off = {sid: r['reason'] for sid, r in pic.items() if r['reason']}
         report['picture_sync'] = {'limit': PIC_LIMIT, 'segments': pic, 'failed': off}
         worst = max([max(abs(r['lo']), abs(r['hi'])) for r in pic.values()] or [0])

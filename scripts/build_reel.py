@@ -24,7 +24,7 @@ from PIL import ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
-from edl_from_words import align, norm  # noqa: E402
+from edl_from_words import align, norm, room_floor  # noqa: E402
 from faces import caption_top  # noqa: E402
 
 SK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -128,19 +128,30 @@ def line(text, st, top, z, maxw):
             'box': [round(cx - w / 2), math.floor(top + min(0, i0)), round(cx + w / 2), math.ceil(top + max(h, i1))]}
 
 
+MIN_STACK_SCALE = .85   # a stack may shrink this far to fit before its lines go one at a time
+
+
 def block(items, top0, z, maxw):
-    """stacked lines at top0; if the stack crosses the safe bottom, one line at a time; if that still crosses, move
-    up until it fits. items: [(text, style)]. Returns (mode, lines, warning)"""
+    """stacked lines at top0; if the stack crosses the safe bottom, the same stack up to 15% smaller; then one line at a
+    time; if that still crosses, move up until it fits. items: [(text, style)]. Returns (mode, lines, warning)"""
     floor = H - z['bottom']
-    for mode in ('stack', 'replace'):
+
+    def stack(scale):
         lines, top = [], top0
         for text, st in items:
-            lines.append(line(text, st, top, z, maxw))
-            if mode == 'stack':
-                top += lines[-1]['h']
-        bottom = max(ln['box'][3] for ln in lines)
-        if bottom <= floor:
-            return mode, lines, None
+            lines.append(line(text, {**st, 'size': math.floor(st['size'] * scale), 'lh': st['lh'] * scale}, top, z, maxw))
+            top += lines[-1]['h']
+        return lines
+    scale = 1.0
+    while scale >= MIN_STACK_SCALE:
+        lines = stack(scale)
+        if max(ln['box'][3] for ln in lines) <= floor:
+            return 'stack', lines, None
+        scale = round(scale - .01, 2)
+    lines = [line(text, st, top0, z, maxw) for text, st in items]
+    bottom = max(ln['box'][3] for ln in lines)
+    if bottom <= floor:
+        return 'replace', lines, None
     shift = bottom - floor
     lines = [line(text, st, top0 - shift, z, maxw) for text, st in items]
     return 'replace', lines, f'moved up {shift}px from y{top0} to fit above y{floor} (check it does not cover the face)'
@@ -184,7 +195,7 @@ def speech_start(pcm, sr, src_in, first_word):
     if not env:
         return first_word
     ranked = sorted(env)
-    floor = ranked[len(ranked) // 20]
+    floor = room_floor(env)                     # digital silence is not the room when the shot has room tone
     level = floor + .3 * (ranked[-1 - len(ranked) // 20] - floor)
     start = int(max(src_in, first_word - .3) * 100)
     quiet = 10 if start == 0 else 0
@@ -285,6 +296,9 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
             gone = b - .12 if mode == 'stack' or k == last else starts[k + 1] - .08
             if starts[k] > gone - .2 - MIN_HOLD:
                 starts[k] = max(gone - .2 - MIN_HOLD, starts[k - 1] + (.05 if mode == 'stack' else .2 + MIN_HOLD + .08))
+        if mode == 'replace':            # one line at a time: a line waits until the one before it has been readable
+            for k in range(1, len(starts)):
+                starts[k] = max(starts[k], starts[k - 1] + .2 + MIN_HOLD + .08)
         for k, t in enumerate(starts):
             gone = b if mode == 'stack' or k == last else max(t + .2, starts[k + 1])
             full = (dur if gone >= dur - .01 else gone - (.12 if gone == b else .08)) - t - .2
