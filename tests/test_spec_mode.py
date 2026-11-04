@@ -67,13 +67,15 @@ class Planner(unittest.TestCase):
         self.assertEqual([w['start'] for w in out], [.46, .8])
         self.assertEqual(E.onset_fix([{'text': 'x', 'start': .3, 'end': .6}], [[0, .46]])[0]['start'], .3)   # not a clip-start word
 
-    def snap(self, speech, soft=(), noise=0, clean_from=None):
+    def snap(self, speech, soft=(), noise=0, clean_from=None, hum=(), blips=()):
         import array
         import random
         sr = 16000
         rnd = random.Random(3)
         pcm = array.array('h', [int(rnd.uniform(-noise, noise)) for _ in range(sr * 3)])
-        for amp, spans in ((5000, speech), (50, soft)):         # soft: a weak /s/ or /h/ just above the room noise
+        # hum: noise between sentences, under the speech line but above the room floor + 4dB; blips: 10-30ms of it just
+        # over the line. soft: a weak /s/ or /h/ just above the room noise
+        for amp, spans in ((40, hum), (80, blips), (5000, speech), (50, soft)):
             for a, b in spans:
                 pcm[int(a * sr):int(b * sr)] = array.array('h', [amp if k % 9 < 4 else -amp for k in range(int(b * sr) - int(a * sr))])
         sp = {'shots': [{'file': 'a.mp4', 'narration': 'Hello there. Look up.'}]}
@@ -98,6 +100,23 @@ class Planner(unittest.TestCase):
         a, b = self.snap([(.5, 1.0), (1.65, 2.2)], soft=[(1.0, 1.08), (1.55, 1.65)], noise=30)
         self.assertGreaterEqual(a['out'], 1.08 + .05)
         self.assertLessEqual(b['in'], 1.55 - .05)
+
+    def test_noise_between_sentences_is_cut_as_one_pause(self):
+        # a test shot: 1.2s between two sentences held noise at the speech line with 10-30ms peaks just over it; the
+        # pause broke into fragments, the planner joined the sentences seamlessly and kept the 1.2s of dead air
+        blips = [(t, t + d) for t, d in ((1.08, .02), (1.17, .03), (1.26, .01), (1.33, .03), (1.42, .02), (1.51, .02))]
+        a, b = self.snap([(.5, 1.0), (1.65, 2.2)], noise=30, hum=[(1.0, 1.65)], blips=blips)
+        self.assertGreater(b['in'], a['out'])                     # a cut, not a seamless join
+        self.assertLessEqual(a['out'], 1.0 + .15 + .12 + .01)      # sound end + soft-edge walk + 0.12
+        self.assertGreaterEqual(b['in'], 1.65 - .15 - .1 - .01)
+
+    def test_only_short_quiet_runs_over_the_line_count_as_pause(self):
+        # 10ms frames at -55dB, speech line -50dB: a run of 4 frames 4dB over it is noise, 5 frames or 7dB over is sound
+        def gaps(run, over):
+            return E.pauses([-55] * 20 + [-50 + over] * run + [-55] * 20, -50, 0, 1)
+        self.assertEqual(gaps(4, 4), [(0, .44)])
+        self.assertEqual(gaps(5, 4), [(0, .2), (.25, .45)])
+        self.assertEqual(gaps(2, 7), [(0, .2), (.22, .42)])
 
     def test_a_shot_opening_on_unclean_frames_starts_at_its_first_clean_frame_when_no_speech_is_lost(self):
         # a test shot opened on a blurred foreground object (frames 0-17) that the cut kept

@@ -93,11 +93,30 @@ def levels(pcm, sr):
     return db, room_floor(db) + 10
 
 
+BLIP, BLIP_DB = .05, 6   # a run over the speech line shorter than this and under line + BLIP_DB is noise, not sound
+SOFT = .15               # a soft /s/, /h/ or /th/ edge lasts at most this long (measured walks: up to 0.15s)
+
+
+def quiet_frames(db, line):
+    """True for a frame below the speech line or inside a blip: a run over the line shorter than BLIP and under
+    line + BLIP_DB with quiet frames on both sides (room noise or a click between sentences; a measured shot had
+    10-30ms peaks up to 4.2dB over the line, its quietest real syllable ran 60ms)"""
+    q, i = [v < line for v in db], 0
+    while i < len(q):
+        j = i
+        while j < len(q) and not q[j]:
+            j += 1
+        if 0 < i < j < len(q) and j - i < round(BLIP * 100) and max(db[i:j]) < line + BLIP_DB:
+            q[i:j] = [True] * (j - i)
+        i = j + 1
+    return q
+
+
 def pauses(db, line, a, b, least=.03):
-    """[(start, end)] runs below the speech line of at least `least` seconds inside a..b"""
-    out, run = [], None
+    """[(start, end)] runs of quiet frames (below the speech line, blips included) of at least `least` seconds in a..b"""
+    out, run, q = [], None, quiet_frames(db, line)
     for i in range(max(0, int(a * 100)), min(len(db), int(b * 100))):
-        if db[i] < line:
+        if q[i]:
             run = i if run is None else run
         else:
             if run is not None and i - run >= least * 100:
@@ -110,12 +129,14 @@ def pauses(db, line, a, b, least=.03):
 
 def soft_edges(db, line, p0, p1):
     """a pause's real edges: a soft /s/, /h/ or /th/ is quieter than the speech line but still above the room
-    (floor + 4dB), so the sound ends later and starts earlier than the line says"""
+    (floor + 4dB), so the sound ends later and starts earlier than the line says. A walk stops after SOFT: past that
+    it is noise between sentences, not a consonant"""
     quiet = line - 6
     s, e = int(p0 * 100), int(p1 * 100)
-    while s < e and db[s] > quiet:
+    s1, e1 = s + round(SOFT * 100), e - round(SOFT * 100)
+    while s < min(e, s1) and db[s] > quiet:
         s += 1
-    while e > s and db[e - 1] > quiet:
+    while e > max(s, e1) and db[e - 1] > quiet:
         e -= 1
     return (s / 100, e / 100) if e - s >= 3 else (p0, p1)
 
