@@ -393,7 +393,7 @@ def build(spec, look, platform, segs, words, cut_words, dur, safe=False, sfx=(),
 
     # grade, cut punch, a whoosh where the shot changes
     grade = [f"gsap.set('.g',{{filter:'{look['grade']}'}});"]
-    if look.get('cut_punch', 1) > 1:
+    if look.get('cut_punch', 1) > 1 and not spec.get('one_take'):     # one take per shot: no zoom on a cut
         grade += [f"tl.fromTo('#stage',{{scale:{look['cut_punch']}}},{{scale:1,duration:{PUNCH_S},ease:'power2.out',immediateRender:false}},{t:.3f});"
                   for t in T[1:]]
     audio, sfx_on = [], spec.get('sfx') is not False     # spec "sfx": false: no sound effects (render_packet.py)

@@ -169,6 +169,7 @@ class Packet(unittest.TestCase):
         self.assertEqual(Q.provenance_problems(sp, require=True), [])
         self.assertEqual((sp['look'], sp['platform'], sp['sfx'], sp['slug']), ('cool-girl', 'tiktok', False, 'ep-00000000'))
         self.assertNotIn('sentences', sp)
+        self.assertIs(sp['one_take'], True)                 # generated shots: one take each, no zoom on cuts
 
     def test_look_and_platform_default_to_bold_reels(self):
         argv = ['render_packet.py', self.write(self.pk), '--shots', self.shots, '--out', self.out]

@@ -103,6 +103,8 @@ the hand-adapted template: describe the reel once in a **reel spec** and run one
 - `look`: a pack in `looks/` (`bold`, `cool-girl`). `platform`: `reels`, `tiktok` or `shorts` (safe zones in layout.md).
 - `"sfx": false`: no sound effects (none are copied into the project or placed on the timeline). The render engine
   always sets it.
+- `"one_take": true`: each shot is one take: its sentences join in the pause between them (nothing inside a shot is
+  cut out) and the look's cut punch (the `#stage` zoom) is off. The render engine always sets it (generated shots).
 
 ```bash
 PY SK/scripts/make_reel.py <reel.json> --out <project>                      # all stages
@@ -128,7 +130,7 @@ PY SK/scripts/render_packet.py <packet.json> --shots <dir> --out <dir> [--look b
 - Packet: `{shots: [{narration}], provenance: {episodeId, productionId, ..., creativeReview, approval, shots:
   [{operationId, sha256, narration, url, ...}]}}`. `--shots` holds the staged shot files; each is matched by its sha256
   against `provenance.shots[i].sha256`. `url` is never fetched.
-- It writes `<out>/packet.reel.json` (shots in packet order, provenance copied in, `"sfx": false`, no `sentences` or
+- It writes `<out>/packet.reel.json` (shots in packet order, provenance copied in, `"sfx": false`, `"one_take": true`, no `sentences` or
   `caption_top`, a shot's `clean_from` where `openings.py` finds an unclean opening), `<out>/openings.json` (every
   shot's opening note; `reel_check.py` copies it into `qa-report.json` under `openings` and prints a line for each shot
   whose `clean_from` was not found or not applied) and `<out>/expected-text.txt`, then runs

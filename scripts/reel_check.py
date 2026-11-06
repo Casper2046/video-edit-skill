@@ -74,7 +74,8 @@ def speech_onset(pcm, sr, first_word, not_before=None):
     """Speech onset of a sentence's first word in a shot's 16-bit mono PCM, searched first_word -0.25..+1.0s (Whisper
     hangs a pause on the next word). Pre-emphasised 5ms frame energy against the local floor (10th percentile, +-1s):
     the first 15ms at speech level (floor +25dB), walked back to where its rise left breath level (floor +15dB), and
-    preceded by 120ms at breath level or below (10ms of clicks allowed). A sound already under way at the window
+    preceded by 120ms under speech level (10ms of clicks allowed): a breath or room tone over the breath line before
+    the word is not a word (episode 1ecda41a: requiring breath level skipped two first words). A sound already under way at the window
     start belongs to the previous word. Checked against 17 independent labels on real generated voices (private; tests/test_spec_mode.py
     runs them when VIDEO_EDIT_ONSET_FIXTURES is set) and on synthetic audio.
     not_before: a cut; nothing before it belongs to this sentence (it counts as quiet)."""
@@ -94,7 +95,7 @@ def speech_onset(pcm, sr, first_word, not_before=None):
             j = i
             while j > nb and db[j - 1] > breath:
                 j -= 1
-            if sum(d > breath for d in db[max(nb, j - 24):j]) <= 2:
+            if sum(d > speech for d in db[max(nb, j - 24):j]) <= 2:
                 return j / FR
             while i < end and db[i] > breath:
                 i += 1
@@ -146,6 +147,13 @@ def chunk_holds(page, end):
     hides = dict(re.findall(r"tl\.to\('#(w\d+-\d+)',\{autoAlpha:0[^}]*\},([\d.]+)\);", page))
     shows = re.findall(r"tl\.fromTo\('#(w\d+-\d+)',\{[^}]*\},\{[^}]*?duration:([\d.]+)[^}]*\},([\d.]+)\);", page)
     return {c: float(hides.get(c, end)) - float(t) - float(d) for c, d, t in shows}
+
+
+def short_holds(page, end):
+    """{chunk id: seconds at full opacity, to the ms} for every chunk held under MIN_HOLD: the page times chunks in ms, so
+    the hold is compared in ms (a planned 0.300s hold reads 0.2999999999999999 in floats)"""
+    holds = {c: round(v, 3) for c, v in chunk_holds(page, end).items()}
+    return {c: v for c, v in holds.items() if v < MIN_HOLD}
 
 
 def level_db(x, a, b, sr):
@@ -587,7 +595,7 @@ def main():
         fails += [f'caption onset NOT MEASURED: {why}', f'caption presence NOT MEASURED: {why}']
 
     dur = len(stem[0]) / 2 / 16000
-    short = {c: round(v, 3) for c, v in chunk_holds(page, dur).items() if v < MIN_HOLD}
+    short = short_holds(page, dur)
     report['caption_hold'] = {'min': MIN_HOLD, 'short': short}
     print(f'caption hold: {len(short)} chunks under {MIN_HOLD}s at full opacity' + (f'  {short}' if short else ''))
     if short:

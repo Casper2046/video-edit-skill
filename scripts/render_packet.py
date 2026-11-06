@@ -6,7 +6,7 @@ The packet: {shots: [{narration}], provenance: {episodeId, productionId, ..., sh
 [{operationId, sha256, narration, url, ...}]}}. Each shot is the file in --shots whose sha256 is provenance.shots[i].sha256;
 url is never fetched. A missing, ambiguous or mismatched shot, one that matches but cannot be decoded, an unreadable
 packet or one reel_check would refuse exits 2 naming it.
-Writes <out>/packet.reel.json (shots in packet order, provenance copied in, no sentences or caption_top, sfx off, a
+Writes <out>/packet.reel.json (shots in packet order, provenance copied in, no sentences or caption_top, sfx off, one_take on, a
 shot's clean_from where openings.py finds an unclean opening), <out>/openings.json (every shot's opening note) and
 <out>/expected-text.txt (every caption chunk, one per line), then runs make_reel.py --require-provenance --expect-text
 and exits with its exit code: 0 every check passes, 1 a QA check failed, 2 refused, 3 a stage failed or crashed (a
@@ -99,7 +99,7 @@ def convert(packet_path, shots_dir, out, look, platform):
     files = match_shots(pk, shots_dir)
     prov = pk['provenance']
     slug = 'ep-' + (re.sub(r'[^a-z0-9]', '', str(prov.get('episodeId', '')).lower())[:8] or 'unknown')
-    spec = {'slug': slug, 'look': look, 'platform': platform, 'sfx': False,
+    spec = {'slug': slug, 'look': look, 'platform': platform, 'sfx': False, 'one_take': True,
             'shots': [{'file': f, 'narration': s['narration']} for f, s in zip(files, pk['shots'])], 'provenance': prov}
     problems = provenance_problems(spec, require=True)
     if problems:

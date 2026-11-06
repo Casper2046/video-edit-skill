@@ -13,6 +13,8 @@ hangs a pause on the next word and ends words early): between two sentences of a
 pause that sound follows before the next sentence's last word (out = pause start + 0.12 + hold, in = pause end - 0.10);
 a pause too short for both becomes one seamless join at its middle (out == next in, no jump, no fades). A shot's first sentence starts 0.10 before the sound that
 ends the pause holding Whisper's first-word start; its last sentence ends 0.12 after the sound does.
+One take (spec "one_take": true, render_packet.py): a shot's sentences join seamlessly in the middle of the pause
+between them (out == next in), so the whole take plays and only its lead-in and tail are trimmed.
 Opening rule: a shot whose spec gives clean_from (seconds: its first clean frame, e.g. after a blurred foreground object)
 starts there when that keeps MIN_LEAD before the first word's sound; otherwise the in point stays, and the segment
 carries an "opening" note saying why (e.g. a shot unclean to 0.75s whose first word starts at 0.02s).
@@ -200,6 +202,9 @@ def plan(spec, words, silences, durations, audio=None):
                     e['out'] = nxt['in'] = (p0 + p1) / 2
             for e in shot_edl:
                 e['in'], e['out'] = round(e['in'], 3), round(e['out'], 3)
+        if spec.get('one_take'):     # a generated shot is one take: its sentences join in their pause, nothing is cut out
+            for e, nxt in zip(edl[first:], edl[first + 1:]):
+                e['out'] = nxt['in'] = round((e['out'] + nxt['in']) / 2, 3)
         clean, e = shot.get('clean_from'), edl[first]
         if clean is not None and clean > e['in']:
             if clean <= e['_onset'] - MIN_LEAD:

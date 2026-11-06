@@ -305,6 +305,34 @@ class Builder(unittest.TestCase):
             self.assertEqual(sum(c for c, _ in B.default_chunks(n)), n)
 
 
+class OneTake(unittest.TestCase):
+    """Generated shots are one take each (Andy, 6 Nov: "jumpy ... weird zoom in out fast on the same angle"): a one_take
+    spec never cuts the pause inside a shot and never zooms the picture on a cut."""
+
+    def test_sentences_of_one_shot_join_seamlessly_and_keep_the_whole_take(self):
+        _, _, _, cut, _, _ = inputs()
+        _, _, _, edl, _, _ = inputs(spec(one_take=True))
+        for e, nxt in zip(edl, edl[1:]):
+            if e['clip'] == nxt['clip']:
+                self.assertEqual(e['out'], nxt['in'])
+        for clip in ('c1', 'c2'):
+            take, was = [e for e in edl if e['clip'] == clip], [e for e in cut if e['clip'] == clip]
+            self.assertEqual((take[0]['in'], take[-1]['out']), (was[0]['in'], was[-1]['out']))
+            self.assertAlmostEqual(sum(e['out'] - e['in'] for e in take), take[-1]['out'] - take[0]['in'], places=3)
+
+    def test_without_one_take_a_pause_inside_a_shot_is_still_cut(self):
+        _, _, _, edl, _, _ = inputs()
+        self.assertLess(edl[0]['out'], edl[1]['in'])
+
+    def test_a_one_take_build_never_zooms_the_picture_on_a_cut(self):
+        sp, words, _, _, segs, dur = inputs(spec(one_take=True))
+        page, _, _ = B.build(sp, B.load_look('bold'), 'reels', segs, words, [], dur)
+        self.assertNotIn("tl.fromTo('#stage'", page)
+        sp, words, _, _, segs, dur = inputs()
+        page, _, _ = B.build(sp, B.load_look('bold'), 'reels', segs, words, [], dur)
+        self.assertIn("tl.fromTo('#stage'", page)
+
+
 class AutoCaptionTop(unittest.TestCase):
     def test_captions_start_20px_plus_3px_render_headroom_under_the_face_bottom_but_not_above_the_chest_band(self):
         # a test run: captions sat exactly on two shots' face bottom (0px margin). A held-out episode's run: on
@@ -574,6 +602,52 @@ class FilmChecks(unittest.TestCase):
         rng = np.random.default_rng(1)
         src = rng.standard_normal(16000)
         self.assertAlmostEqual(Q.xcorr_offset(src[3200:6400], src, 16000), .2, places=3)
+
+
+def pre_emphasised(pieces, seed=0, sr=16000):
+    """[(until s, dB)]: white noise at that level as reel_check's speech_onset sees it (after its pre-emphasis), so the
+    levels below are its own frame levels: 16-bit mono PCM bytes"""
+    import array
+    import random
+    rnd, out, prev = random.Random(seed), array.array('h'), 0.0
+    for until, db in pieces:
+        amp = 32767 * 10 ** (db / 20)
+        while len(out) < int(until * sr):
+            prev = rnd.gauss(0, amp) + .95 * prev
+            out.append(int(max(-32767, min(32767, prev))))
+    return out.tobytes(), sr
+
+
+class FilmFalseFailures(unittest.TestCase):
+    """Episode 1ecda41a (render eecb53ee, 2026-11-05) failed QA with captions that were on time: the film onset skipped a
+    sentence's first word and measured a later one (s2 -0.647s, s11 -0.698s), and a chunk held exactly 0.300s failed
+    as shorter than 0.30s (w0-1). Levels are speech_onset's 5ms pre-emphasised frame levels measured on that film."""
+
+    def test_a_breath_before_the_first_word_does_not_push_the_onset_to_a_later_word(self):
+        # s2 "Start with your feet": cut 1.167s; a 70ms breath at floor+20dB (film: -36..-41, floor -56), 45ms quiet,
+        # "Start" at 1.285s. The onset wanted 120ms at breath level (floor+15) before it, so it skipped "Start" and
+        # "with" and took "your" (1.880s in the film: caption error -0.647s)
+        pcm, sr = pre_emphasised([(.90, -30), (35 / 30, -65), (1.24, -45), (1.285, -60), (1.42, -28), (1.50, -45),
+                                  (1.72, -30), (1.875, -60), (3.0, -28)])
+        self.assertAlmostEqual(Q.speech_onset(pcm, sr, 1.107, not_before=35 / 30), 1.285, delta=.01)
+
+    def test_room_tone_on_the_breath_line_does_not_push_the_onset_to_a_later_word(self):
+        # s11 "Feet, three slow breaths out": cut 26.1s (here 1.1s); room tone sitting on the breath line (film: -52..-57
+        # against a -54.1 line, 4 of 24 frames over it) up to "Feet," at 26.365s; the onset took "three" (27.065s:
+        # caption error -0.698s)
+        room = [p for k in range(12) for p in ((1.135 + .02 * k, -58), (1.14 + .02 * k, -52))]
+        pcm, sr = pre_emphasised([(.95, -26), (1.08, -55), (1.12, -78), *room, (1.365, -58), (1.57, -31), (2.05, -70),
+                                  (3.0, -38)])
+        self.assertAlmostEqual(Q.speech_onset(pcm, sr, 1.36, not_before=1.1), 1.365, delta=.01)
+
+    def test_a_chunk_held_exactly_the_minimum_is_not_short(self):
+        # w0-1 'do?': the planner holds a sentence's last chunk exactly MIN_HOLD (0.544667s in, gone at 1.044667s); the
+        # page writes milliseconds (0.545, 1.045) and 1.045 - 0.545 - 0.2 is 0.2999999999999999 in floats
+        page = ("tl.fromTo('#w0-1',{autoAlpha:0,scale:1.22},{autoAlpha:1,scale:1,duration:0.2,ease:'power3.out',immediateRender:false},0.545);"
+                "tl.to('#w0-1',{autoAlpha:0,scale:.96,filter:'blur(16px)',duration:0.12},1.045);"
+                "tl.fromTo('#w0-2',{autoAlpha:0},{autoAlpha:1,duration:0.2},2.000);"
+                "tl.to('#w0-2',{autoAlpha:0,duration:0.12},2.299);")
+        self.assertEqual(Q.short_holds(page, 29.4), {'w0-2': .099})
 
 
 class Assemble(unittest.TestCase):
