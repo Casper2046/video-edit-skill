@@ -52,13 +52,21 @@ def sentences(narration):
 
 
 def align(tokens, words):
-    """index into words for every token, or None. Same-length replacements count (colour/color, 'Just'/Just)."""
+    """index into words for every token, or None. Same-length replacements count (colour/color, 'Just'/Just), and so do
+    words the transcript merged or split when their letters nearly match (mark it/market, everyone/every one): the last
+    token lands on the last heard word, the first on the first, the rest in proportion."""
     a, b = [norm(t) for t in tokens], [norm(w['text']) for w in words]
     out = [None] * len(tokens)
     for tag, a0, a1, b0, b1 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if tag == 'equal' or (tag == 'replace' and a1 - a0 == b1 - b0):
             for k in range(a1 - a0):
                 out[a0 + k] = b0 + k
+        elif tag == 'replace':
+            sa, sb = ''.join(a[a0:a1]), ''.join(b[b0:b1])
+            if min(len(sa), len(sb)) >= 4 and difflib.SequenceMatcher(None, sa, sb, autojunk=False).ratio() >= .8:
+                n, m = a1 - a0, b1 - b0
+                for k in range(n):
+                    out[a1 - 1 - k] = b1 - 1 - round(k * (m - 1) / max(1, n - 1))
     return out
 
 

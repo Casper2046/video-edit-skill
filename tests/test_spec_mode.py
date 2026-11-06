@@ -61,6 +61,19 @@ class Planner(unittest.TestCase):
         ws = [{'text': t} for t in ['a', 'color,', 'and', 'sound']]
         self.assertEqual(E.align(['a', 'colour,', 'and', 'a', 'sound.'], ws), [0, 1, 2, None, 3])
 
+    def test_align_maps_words_the_transcript_merged_or_split(self):
+        # Live film 3 (6 Nov, render 34b0ca08): "could mark it?" was heard as "could market?"; the sentence's last word
+        # must still land on the merged word so its end time is known.
+        ws = [{'text': t} for t in ['What', 'small', 'ritual', 'could', 'market?']]
+        self.assertEqual(E.align(['What', 'small', 'ritual', 'could', 'mark', 'it?'], ws), [0, 1, 2, 3, 4, 4])
+        ws = [{'text': t} for t in ['do', 'it', 'every', 'one']]
+        self.assertEqual(E.align(['do', 'it', 'everyone.'], ws), [0, 1, 3])
+        # Different words of a different length still do not match (no fuzzy guess on short words).
+        ws = [{'text': t} for t in ['go', 'now']]
+        self.assertEqual(E.align(['go', 'home', 'now'], ws), [0, None, 1])
+        ws = [{'text': t} for t in ['the', 'cat']]
+        self.assertEqual(E.align(['the', 'dog', 'cat'], ws), [0, None, 1])
+
     def test_onset_fix_moves_clip_start_word_to_speech_onset(self):
         ws = [{'text': 'Look', 'start': 0.0, 'end': .7}, {'text': 'up', 'start': .8, 'end': 1.0}]
         out = E.onset_fix(ws, [[0, .46], [1.2, 2]])
