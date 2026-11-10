@@ -1,0 +1,36 @@
+<!--
+  circle (kit film3-r3.2): r3's hand-drawn ring (V2 hw-callout-circle wobble ellipse), red ink over a cream halo, drawn round
+  a target: a box in its take's pixels stored with the take (meta targets), mapped to the frame as the take is placed.
+  The ring's path (r3's wobbleEllipse, kit seed/wobble/turns) is computed by render_planned.py and written here. r3's
+  dash "draw-on" (stroke-dashoffset 0.55 -> 0 in 0.3 s) is left out: on HyperFrames 0.9.23 it rendered pixel-identical
+  to the whole ring on every frame after the first and hid the ring on its host's first frame (ticket 03, experiment G).
+  The ring is whole from its first frame and holds. Parameters (render_planned.py): id, d, hold.
+-->
+<template>
+  <div id="root" data-composition-id="__ID__" data-width="1080" data-height="1920">
+    <style>
+      #root { position: absolute; inset: 0; pointer-events: none; }
+      #__ID__-svg { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; overflow: visible; }
+      #__ID__-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: 0.95; }
+    </style>
+    <svg id="__ID__-svg" viewBox="0 0 1080 1920" data-layout-ignore>
+      <defs>
+        <filter id="__ID__-inkfx" x="-10%" y="-30%" width="120%" height="160%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="6" result="n" />
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="3" />
+        </filter>
+      </defs>
+      <g filter="url(#__ID__-inkfx)">
+        <path id="__ID__-halo" pathLength="1" d="__D__" style="stroke: var(--color-paper, #fbf6ec); stroke-width: 22" />
+        <path id="__ID__-ink" pathLength="1" d="__D__" style="stroke: var(--color-marker, #c4161c); stroke-width: 12" />
+      </g>
+    </svg>
+    <script>
+      (function () {
+        var tl = gsap.timeline({ paused: true });
+        tl.set({}, {}, __HOLD__);
+        window.__timelines["__ID__"] = tl;
+      })();
+    </script>
+  </div>
+</template>

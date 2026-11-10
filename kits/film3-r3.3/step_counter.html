@@ -1,0 +1,75 @@
+<!--
+  step counter (kit film3-r3.2): r3's counter.html, a persistent element: one id, timed updates in place. A paper tab (400x128
+  at the preset anchor bottom_left, x 36-436, y 1210-1338: below the caption band, above the 1344 safe line, below every
+  face box of film 3) with three hand-drawn slots and the count in Caveat. It appears already reading 1/3 on its first
+  update's cue; each later "k/3" ticks slot k and swaps the number on its cue's frame; "pulse" glows the next empty slot
+  once (pulseSec, starting a frame early so it shows on its cue's frame); hidden at the host's end (its untilLineEnd cut).
+  Parameters (render_planned.py): id, left, top, updates, end.
+-->
+<template>
+  <div id="root" data-composition-id="__ID__" data-width="1080" data-height="1920">
+    <style>
+      @font-face { font-family: "Caveat"; font-weight: 700; src: url("assets/fonts/Caveat-700-latin.woff2") format("woff2"); }
+      #root { position: absolute; inset: 0; pointer-events: none; }
+      #__ID__-wrap { position: absolute; left: __LEFT__px; top: __TOP__px; width: 400px; height: 128px; }
+      #__ID__-card {
+        position: absolute; left: 0; top: 0; width: 400px; height: 128px; border-radius: 20px;
+        background: var(--color-paper, #fbf6ec); box-shadow: 0 14px 28px rgba(30, 18, 8, 0.45), 0 2px 5px rgba(30, 18, 8, 0.3);
+      }
+      #__ID__-svg { position: absolute; left: 0; top: 0; width: 400px; height: 128px; overflow: visible; }
+      .__ID__-box { fill: none; stroke: var(--color-ink, #1f2d5c); stroke-width: 5; stroke-linejoin: round; }
+      .__ID__-glow { fill: var(--color-accent, #ffc23d); opacity: 0; }
+      .__ID__-tick {
+        fill: none; stroke: var(--color-marker, #c4161c); stroke-width: 11; stroke-linecap: round; stroke-linejoin: round;
+        stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0;
+      }
+      .__ID__-n {
+        position: absolute; left: 262px; top: 14px; width: 124px; text-align: center; font-family: "Caveat", cursive;
+        font-weight: 700; font-size: 88px; line-height: 100px; color: var(--color-ink, #1f2d5c); white-space: nowrap; opacity: 0;
+      }
+    </style>
+    <div id="__ID__-wrap" data-layout-allow-overflow>
+      <div id="__ID__-card"></div>
+      <svg id="__ID__-svg" viewBox="0 0 400 128" data-layout-ignore>
+        <rect class="__ID__-glow" id="__ID__-g1" x="17" y="31" width="66" height="68" rx="9" />
+        <rect class="__ID__-glow" id="__ID__-g2" x="92" y="31" width="66" height="68" rx="9" />
+        <rect class="__ID__-glow" id="__ID__-g3" x="167" y="31" width="66" height="68" rx="9" />
+        <path class="__ID__-box" id="__ID__-b1" d="M20 34 L84 32 L85 98 L21 99 Z" />
+        <path class="__ID__-box" id="__ID__-b2" d="M95 32 L159 34 L158 99 L96 98 Z" />
+        <path class="__ID__-box" id="__ID__-b3" d="M170 34 L234 32 L234 98 L169 99 Z" />
+        <path class="__ID__-tick" id="__ID__-t1" pathLength="1" d="M28 66 L48 88 L82 22" />
+        <path class="__ID__-tick" id="__ID__-t2" pathLength="1" d="M103 66 L123 88 L157 22" />
+        <path class="__ID__-tick" id="__ID__-t3" pathLength="1" d="M178 66 L198 88 L232 22" />
+      </svg>
+      <div class="__ID__-n" id="__ID__-n1" data-layout-allow-overlap data-layout-allow-occlusion>1/3</div>
+      <div class="__ID__-n" id="__ID__-n2" data-layout-allow-overlap data-layout-allow-occlusion>2/3</div>
+      <div class="__ID__-n" id="__ID__-n3" data-layout-allow-overlap data-layout-allow-occlusion>3/3</div>
+    </div>
+    <script>
+      (function () {
+        var tl = gsap.timeline({ paused: true });
+        var P = "#__ID__-";
+        // first update (1/3): appears already reading 1/3 (slot 1 checked), opaque from its first frame
+        tl.set(P + "t1", { opacity: 0.92, strokeDashoffset: 0 }, 0);
+        tl.set(P + "n1", { opacity: 1 }, 0);
+        tl.fromTo(P + "wrap", { scale: 0.75, rotation: 4, transformOrigin: "0% 100%" }, { scale: 1, rotation: -1.5, duration: 0.22, ease: "back.out(1.6)" }, 0);
+        function step(k, t) {
+          tl.set(P + "t" + k, { opacity: 0.92 }, t);
+          tl.fromTo(P + "t" + k, { strokeDashoffset: 0.85 }, { strokeDashoffset: 0, duration: 0.2, ease: "power2.out" }, t);
+          tl.set(P + "n" + (k - 1), { opacity: 0 }, t);
+          tl.set(P + "n" + k, { opacity: 1 }, t);
+          tl.fromTo(P + "n" + k, { scale: 1.3 }, { scale: 1, duration: 0.2, ease: "back.out(2)" }, t);
+        }
+        function pulse(k, t, hold) {
+          tl.fromTo(P + "g" + k, { opacity: 0 }, { opacity: 0.85, duration: 0.2, ease: "sine.out" }, t);
+          tl.to(P + "g" + k, { opacity: 0, duration: 0.2, ease: "sine.in" }, t + hold - 0.2);
+          tl.fromTo(P + "b" + k, { scale: 1, transformOrigin: "50% 50%" }, { scale: 1.15, duration: 0.2, ease: "sine.out" }, t);
+          tl.to(P + "b" + k, { scale: 1, duration: 0.2, ease: "sine.in" }, t + hold - 0.2);
+        }
+__UPDATES__        tl.set(P + "wrap", { opacity: 0 }, __END__);
+        tl.set({}, {}, __END__);
+        window.__timelines["__ID__"] = tl;
+      })();
+    </script>
+  </div>
+</template>

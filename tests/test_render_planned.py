@@ -637,5 +637,68 @@ class Entry(unittest.TestCase):
         self.assertIn('0.8.34', str(e.exception))
 
 
+NOTEPAD = {'writing': {'x': 145.02, 'y': 107.19, 'size': 107.19, 'maxChars': 10,
+                       'rules': {'firstY': 164, 'pitch': 44.6, 'fromRule': 3, 'left': 148.17, 'right': 472.88, 'rightSpread': 226.98, 'bottom': 945.76},
+                       'lines': {'size': 84, 'every': 2, 'max': 4, 'maxChars': 14}}}
+STICKY = {'writing': {'y': 299.33, 'size': 267.82, 'align': 'center', 'maxChars': 8}}
+
+
+class Handwriting(unittest.TestCase):
+    """kit film3-r3.3 (ticket 08, lead 10 Nov): a photo panel's stills are blank; the plan may write on them in r3's hand:
+    on the notepad a heading, short lines on its rules and optionally scribble on the rest; on the sticky one line"""
+    def panel(self, *writing):
+        return packet(g({'lineId': 'l3', 'from': 0, 'to': 1, 'words': 'Your phone.'}, 'g-plate', 3.0,
+                        assets=[still('still-notepad', 'n' * 64, 744, 1000, **NOTEPAD), still('still-sticky', 's' * 64, 961, 923, **STICKY)],
+                        writing=list(writing)))
+
+    def refused(self, pk):
+        with self.assertRaises(P.Refused) as e:
+            P.check_packet(pk, KIT)
+        return str(e.exception)
+
+    def test_the_kit_is_film3_r3_3(self):
+        self.assertEqual(P.PIN['kit'], 'film3-r3.3')
+        self.assertEqual(KIT['kit'], 'film3-r3.3')
+
+    def test_a_heading_lines_and_a_sticky_line_are_accepted_and_every_word_counts_for_the_text_rule(self):
+        pk = self.panel({'assetId': 'still-notepad', 'text': 'Today', 'lines': ['Call mom', 'Gym 6pm'], 'scribble': True},
+                        {'assetId': 'still-sticky', 'text': '+9 more'})
+        P.check_packet(pk, KIT)
+        self.assertEqual(P.text_words(pk['graphics'][0]), 1 + 4 + 2)
+
+    def test_a_line_longer_than_the_picture_allows_refuses_with_the_graphic_id(self):
+        msg = self.refused(self.panel({'assetId': 'still-notepad', 'lines': ['Answer every single email']}))
+        self.assertIn('g-plate', msg)
+        self.assertIn('14 characters', msg)
+
+    def test_a_heading_longer_than_the_picture_allows_refuses(self):
+        self.assertIn('10 characters', self.refused(self.panel({'assetId': 'still-notepad', 'text': 'Things to do today'})))
+
+    def test_more_lines_than_the_page_takes_refuses(self):
+        self.assertIn('4 lines', self.refused(self.panel({'assetId': 'still-notepad', 'lines': ['a', 'b', 'c', 'd', 'e']})))
+
+    def test_lines_on_a_picture_without_ruled_lines_refuse(self):
+        self.assertIn('still-sticky', self.refused(self.panel({'assetId': 'still-sticky', 'lines': ['milk']})))
+
+    def test_writing_that_writes_nothing_refuses(self):
+        self.assertIn('g-plate', self.refused(self.panel({'assetId': 'still-notepad'})))
+
+    def test_each_line_sits_on_its_rule_and_the_scribble_starts_below_the_last_line(self):
+        pk = self.panel({'assetId': 'still-notepad', 'text': 'Today', 'lines': ['Call mom', 'Gym 6pm'], 'scribble': True})
+        gr = pk['graphics'][0]
+        html_ = P.photo_panel_piece(KIT, {'id': 'g-plate', 'frames': 72}, gr, ['a.png', 'b.png'], 24)
+        s = 236 / 744  # the preset's first slot
+        for k, line in ((3, 'Call mom'), (5, 'Gym 6pm')):
+            top = round((164 + 44.6 * k - 84 * 0.78) * s, 2)
+            self.assertIn(f'top: {top}px; font-size: {round(84 * s, 2)}px', html_)
+            self.assertIn(f'>{line}</div>', html_)
+        self.assertIn('>Today</div>', html_)
+        paths = re.findall(r'<path d="M[\d.]+ ([\d.]+)', html_)
+        self.assertEqual(round(float(paths[0]) + 2, 1), round((164 + 44.6 * 7) * s, 1))  # first scribbled rule: 3 + 2 lines x 2
+        no_lines = P.photo_panel_piece(KIT, {'id': 'g-plate', 'frames': 72}, {**gr, 'writing': [{'assetId': 'still-notepad', 'text': 'Today', 'scribble': True}]},
+                                       ['a.png', 'b.png'], 24)
+        self.assertEqual(len(re.findall('<path ', no_lines)) - len(paths), 4)  # rules 3-6 written or skipped
+
+
 if __name__ == '__main__':
     unittest.main()

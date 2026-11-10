@@ -38,7 +38,7 @@ import skillenv  # noqa: E402
 from edl_from_words import align, norm  # noqa: E402
 
 SK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PIN = {'hyperframes': '0.9.23', 'gsap': '3.15.0', 'kit': 'film3-r3.2', 'fps': 24}
+PIN = {'hyperframes': '0.9.23', 'gsap': '3.15.0', 'kit': 'film3-r3.3', 'fps': 24}
 # gsap@3.15.0 dist/gsap.min.js, as hyperframes 0.9.23 ships it
 GSAP_SHA = '92bb9a96476f983d212a2bc4f54c889039c1696dd4461d40a736860938570fbb'
 # settled rules (SPEC module 2): main picture 2.0 s, overlays 1.5 s (a counter state is an overlay, as r3's verifier
@@ -178,13 +178,37 @@ def check_pictures(gr, line, spec, kit):
             require(a, f"{gid}: picture {a['id']}", width=(int, float), height=(int, float))
         ids = {a['id']: a for a in assets}
         for wr in gr.get('writing') or []:
-            a = ids.get(wr.get('assetId'))
-            if not a or not (a.get('meta') or {}).get('writing') or not isinstance(wr.get('text'), str):
-                raise Refused(f"{gid}: writing on {wr.get('assetId')}: not one of its pictures with a writing area (meta.writing)")
+            check_writing(gid, wr, ids.get(wr.get('assetId')))
     if treatment == 'circle':
         if not isinstance(gr.get('target'), str):
             raise Refused(f'{gid}: a circle needs a target (a box stored with its take)')
         target_box(line['take'], gr['target'], gid)
+
+
+def check_writing(gid, wr, a):
+    """kit film3-r3.3: handwriting on one of the panel's stills, within the still's own limits (meta.writing): a heading or
+    centred line (text, at most maxChars), short lines on its rules (lines, at most lines.max of lines.maxChars each)"""
+    m = ((a or {}).get('meta') or {}).get('writing')
+    owner = f"{gid}: writing on {wr.get('assetId') if isinstance(wr, dict) else wr}"
+    if not isinstance(wr, dict) or not m:
+        raise Refused(f"{owner}: not one of its pictures with a writing area (meta.writing)")
+    text, lines = wr.get('text'), wr.get('lines')
+    if text is not None and not isinstance(text, str) or lines is not None and (
+            not isinstance(lines, list) or not all(isinstance(x, str) and x.strip() for x in lines)):
+        raise Refused(f"{owner}: malformed (text is a string, lines a list of strings)")
+    if not (text or '').strip() and not lines:
+        raise Refused(f"{owner}: writes nothing (give text or lines)")
+    if text and m.get('maxChars') and len(text) > m['maxChars']:
+        raise Refused(f"{owner}: '{text}' is longer than its {m['maxChars']} characters")
+    if lines:
+        spec = m.get('lines')
+        if not spec or not m.get('rules'):
+            raise Refused(f"{owner}: it has no ruled lines to write on")
+        if len(lines) > spec['max']:
+            raise Refused(f"{owner}: {len(lines)} lines; the page takes at most {spec['max']} lines")
+        for x in lines:
+            if len(x) > spec['maxChars']:
+                raise Refused(f"{owner}: line '{x}' is longer than its {spec['maxChars']} characters")
 
 
 def check_graphic(gr, lines, kit):
@@ -245,7 +269,8 @@ def check_packet(pk, kit):
 
 
 def text_words(gr):
-    return sum(len(w['text'].split()) for w in gr.get('writing') or [])
+    """every handwritten word on the panel (heading/centred text and lines); the scribble has no words"""
+    return sum(len((w.get('text') or '').split()) + sum(len(x.split()) for x in w.get('lines') or []) for w in gr.get('writing') or [])
 
 
 def resolve(pk, transcript, place, fps, captions=None):
@@ -745,12 +770,12 @@ def wobble_ellipse(cx, cy, rx, ry, seed, wobble_pct, turns):
     return d
 
 
-def scribble(rules, s):
+def scribble(rules, s, start=None):
     """r3's plate.html crammed handwriting, one path per rule from rules.fromRule down (seeded, computed here for the same
     reason as the ring): the rule geometry from the picture's meta in its own pixels, the loops kit constants in display px"""
     left, right, spread, bottom = (round(rules[k] * s, 2) for k in ('left', 'right', 'rightSpread', 'bottom'))
     out = []
-    for k in range(rules['fromRule'], 20):
+    for k in range(rules['fromRule'] if start is None else start, 20):
         base = (rules['firstY'] + rules['pitch'] * k) * s - 2
         if base > bottom:
             break
@@ -794,10 +819,18 @@ def photo_panel_piece(kit, r, gr, rels, fps):
             size, top = round(m['size'] * s, 2), round(m['y'] * s, 2)
             box = (f'left: 0; width: {sw}px; text-align: center' if m.get('align') == 'center'
                    else f"left: {round(m.get('x', 0) * s, 2)}px")
-            inner += (f'        <div class="{gid}-text" style="{box}; top: {top}px; font-size: {size}px; line-height: {size}px" '
-                      f'data-layout-allow-overlap>{html.escape(wr["text"])}</div>\n')
-            if wr.get('scribble') and m.get('rules'):
-                paths = ''.join(f'<path d="{d}" />' for d in scribble(m['rules'], s))
+            if wr.get('text'):
+                inner += (f'        <div class="{gid}-text" style="{box}; top: {top}px; font-size: {size}px; line-height: {size}px" '
+                          f'data-layout-allow-overlap>{html.escape(wr["text"])}</div>\n')
+            rules, spec, written = m.get('rules'), m.get('lines') or {}, wr.get('lines') or []
+            for i, line in enumerate(written):    # kit r3.3: each line on its rule (baseline), r3's ink, from the rule margin
+                k = rules['fromRule'] + i * spec['every']
+                ls, lt = round(spec['size'] * s, 2), round((rules['firstY'] + rules['pitch'] * k - spec['size'] * 0.78) * s, 2)
+                inner += (f'        <div class="{gid}-text" style="left: {round(rules["left"] * s, 2)}px; top: {lt}px; font-size: {ls}px; '
+                          f'line-height: {ls}px" data-layout-allow-overlap>{html.escape(line)}</div>\n')
+            if wr.get('scribble') and rules:
+                start = rules['fromRule'] + len(written) * spec.get('every', 1) if written else None
+                paths = ''.join(f'<path d="{d}" />' for d in scribble(rules, s, start))
                 inner += (f'        <svg class="{gid}-ink" viewBox="0 0 {sw} {sh}" style="width: {sw}px; height: {sh}px" '
                           f'data-layout-ignore><g>{paths}</g></svg>\n')
         layers += (f'      <div class="{gid}-slot" style="left: {sl["left"]}px; top: {sl["top"]}px; width: {sw}px; height: {sh}px; '

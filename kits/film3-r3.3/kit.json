@@ -1,0 +1,43 @@
+{
+ "kit": "film3-r3.3",
+ "version": "r3.3: r3.2 plus handwriting on a photo panel's blank stills (ticket 08, lead 10 Nov): a heading, short lines on the notepad's rules and a sticky-note line in r3's Caveat ink; geometry and limits from each still's meta.writing",
+
+ "fps": 24, "width": 1080, "height": 1920, "duration": 26.458333,
+ "source": "remake-film3-20261108/project-r3: index.html (take placements, top-band presenter shifts), compositions/captions.html (verbatim), plate.html (photo panel), shelf/tea/pen.html (top band b-roll), circle.html, counter.html (step counter)",
+ "takes": {
+  "l1": {"start": 0, "mediaStart": 0.125, "duration": 3.833333},
+  "l2": {"start": 3.833333, "mediaStart": 1, "duration": 3},
+  "l3": {"start": 6.833333, "mediaStart": 0.166667, "duration": 3.583333},
+  "l4": {"start": 10.416667, "mediaStart": 0.083333, "duration": 3.958333},
+  "l5": {"start": 14.375, "mediaStart": 0.041667, "duration": 4},
+  "l6": {"start": 18.375, "mediaStart": 0, "duration": 4.041667},
+  "l7": {"start": 22.416667, "mediaStart": 0, "duration": 4.041667}
+ },
+ "treatments": {
+  "photo_panel": {"layout": "photo_panel", "piece": "photo_panel.html", "pictures": [1, 2], "track": 1, "z": 10},
+  "top_band_broll": {"layout": "top_band", "piece": "top_band_broll.html", "pictures": [1, 1], "track": 1, "z": 10},
+  "circle": {"layout": "overlay", "piece": "circle.html", "pictures": [0, 0], "track": 2, "z": 12},
+  "step_counter": {"layout": "overlay", "piece": "step_counter.html", "persistent": true, "track": 3, "z": 14}
+ },
+ "presets": {
+  "full_presenter": {"presenter": "the take fills the frame (cover), no transform"},
+  "photo_panel": {"box": [800, 570, 1062, 1040], "pad": 20, "enter": 0.3, "exit": 0.2, "hiddenBeforeEnd": 0.02,
+                  "presenter": "unchanged",
+                  "slots": [{"left": 13, "top": 26, "width": 236, "rotate": -3,
+                             "shadow": "drop-shadow(0 10px 10px rgba(60, 36, 14, 0.38)) drop-shadow(0 2px 2px rgba(60, 36, 14, 0.35))"},
+                            {"left": 128, "top": 318, "width": 122, "rotate": 7,
+                             "shadow": "drop-shadow(0 8px 8px rgba(60, 36, 14, 0.42))"}]},
+  "top_band": {"bandHeightPx": 555, "enterFromY": -400, "enter": 0.3, "exit": 0.22, "exitStartsBeforeEnd": 0.246667,
+               "hiddenBeforeEnd": 0.026667,
+               "presenterNote": "step A: the presenter shift is stored per take (take meta topBandShiftPx: r3 200/220/190), the preset value is only the default",
+               "presenter": {"shiftPx": 200, "enter": 0.3, "ease": "power3.out", "exitEase": "power3.inOut",
+                             "note": "the take slides down shiftPx under the band (take meta topBandShiftPx overrides) and back up as a band that ends before the cut leaves"}},
+  "overlay": {"presenter": "unchanged", "anchors": {"bottom_left": [36, 1210, 436, 1338]},
+              "note": "a circle sits on its target (a box in its take's pixels, take meta targets); the step counter on bottom_left"}
+ },
+ "circle": {"seed": 9, "wobblePct": 4, "turns": 1.08},
+ "stepCounter": {"steps": 3, "anchor": "bottom_left", "pulseSec": 1.8,
+                 "measure": {"note": "boxes on the 400x128 tab (padded for its -1.5deg tilt): a state shows where the number changes, a pulse while its slot shows the accent glow",
+                             "number": [252, 0, 396, 128], "slots": [[11, 22, 89, 108], [86, 22, 164, 108], [161, 22, 239, 108]],
+                             "accent": {"minRedMinusBlue": 60, "minGreen": 120}}}
+}

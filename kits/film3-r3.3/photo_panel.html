@@ -1,0 +1,51 @@
+<!--
+  photo panel (kit film3-r3.3): r3's plate.html panel (warm card, grain, drop shadow; preset box x 800-1062, y 570-1040, clear
+  of take 1's face and above the caption band at 1068) holding all of a graphic's pictures: one picture is fitted by its
+  aspect and tilted -3deg; two sit in the preset's slots (r3: the notepad at 13,26 236 wide -3deg, the sticky at 128,318
+  122 wide 7deg). Writing on a picture (plan `writing`: its text, short lines on its rules, optionally the rest of its rules
+  scribbled) goes where the picture's own metadata says (`meta.writing`, in the picture's pixels): text and lines in r3's
+  Caveat ink (plate.html #pl-head / #pl-more look), one line on every `lines.every`-th rule from `rules.fromRule`, the scribble
+  from the rule after the last line; the scribble is r3's seeded handwriting, computed by
+  render_planned.py and written here so it is there on the host's first frame. Slides in from the right with its first frame already on
+  screen, holds, slides out to the right and is hidden just before the host's end. Parameters (render_planned.py): id,
+  layers, hold, exit_at, hide_at and the box.
+-->
+<template>
+  <div id="root" data-composition-id="__ID__" data-width="1080" data-height="1920">
+    <style>
+      @font-face { font-family: "Caveat"; font-weight: 700; src: url("assets/fonts/Caveat-700-latin.woff2") format("woff2"); }
+      #root { position: absolute; inset: 0; pointer-events: none; }
+      #__ID__-panel {
+        position: absolute; left: __LEFT__px; top: __TOP__px; width: __W__px; height: __H__px;
+        border-radius: 18px; overflow: hidden;
+        background: linear-gradient(180deg, #ecdcc0 0%, #e2cba6 70%, #d8bd94 100%);
+        box-shadow: 0 16px 30px rgba(30, 18, 8, 0.45), 0 2px 4px rgba(30, 18, 8, 0.3);
+      }
+      #__ID__-grain { position: absolute; left: 0; top: 0; width: __W__px; height: __H__px; opacity: 0.22; mix-blend-mode: multiply; }
+      .__ID__-slot { position: absolute; }
+      .__ID__-slot img { position: absolute; left: 0; top: 0; }
+      .__ID__-text {
+        position: absolute; font-family: "Caveat", cursive; font-weight: 700;
+        color: var(--color-ink, #1f2d5c); mix-blend-mode: multiply; white-space: nowrap;
+      }
+      .__ID__-ink { position: absolute; left: 0; top: 0; overflow: visible; mix-blend-mode: multiply; }
+      .__ID__-ink path { fill: none; stroke: var(--color-ink, #1f2d5c); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <div id="__ID__-panel" data-layout-allow-overflow>
+      <svg id="__ID__-grain" viewBox="0 0 __W__ __H__" data-layout-ignore>
+        <filter id="__ID__-noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" /><feColorMatrix type="saturate" values="0" /></filter>
+        <rect width="__W__" height="__H__" filter="url(#__ID__-noise)" />
+      </svg>
+__LAYERS__    </div>
+    <script>
+      (function () {
+        var tl = gsap.timeline({ paused: true });
+        tl.fromTo("#__ID__-panel", { x: 200, rotation: 4 }, { x: 0, rotation: 0, duration: __ENTER__, ease: "power3.out" }, 0);
+        tl.to("#__ID__-panel", { x: 320, rotation: 4, duration: __EXIT__, ease: "power3.in" }, __EXIT_AT__);
+        tl.set("#__ID__-panel", { opacity: 0 }, __HIDE_AT__);
+        tl.set({}, {}, __HOLD__);
+        window.__timelines["__ID__"] = tl;
+      })();
+    </script>
+  </div>
+</template>
