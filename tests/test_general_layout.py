@@ -332,6 +332,13 @@ class MeasureCommand(unittest.TestCase):
             self.assertEqual((out[0]['fromFrame'], out[0]['toFrame']), (4, 35))   # 0.3 - 0.1 s floored; 1.3 + 0.12 s ceiled
             self.assertEqual(out[0]['rule'], C.RULE)
             self.assertIn('no speech', out[1]['refused'])
+            # --out FILE: the same list written to a file (the render worker keeps only its output's tail)
+            dest = os.path.join(d, 'cuts.json')
+            q = subprocess.run([sys.executable, os.path.join(ROOT, 'scripts', 'take_cuts.py'), '--words', words, '--out', dest, ok],
+                               capture_output=True, text=True)
+            self.assertEqual(q.returncode, 0, q.stderr)
+            with open(dest) as fh:
+                self.assertEqual([(x['fromFrame'], x['toFrame']) for x in json.load(fh)], [(4, 35)])
 
 
 if __name__ == '__main__':

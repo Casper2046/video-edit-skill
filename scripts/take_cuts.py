@@ -2,10 +2,11 @@
 """Planned mode (ticket 11): a take's cut, measured once from its own audio and words, so the plan checks and the render use
 the same cut (the packet carries it as take meta.cut; render_planned.py lays the takes end to end from it).
 
-Usage:  PY take_cuts.py [--words WORDS.json] [--lines LINES.json] <take.mp4> [<take.mp4> ...]
+Usage:  PY take_cuts.py [--words WORDS.json] [--lines LINES.json] [--out FILE] <take.mp4> [<take.mp4> ...]
 WORDS.json maps a take's path to its stored words ([{word, start, end}], take seconds); a take without them is transcribed
 here (medium.en). LINES.json maps a take's path to its line's script text: the cut is bounded by the script's words, so an
-ad-lib before them ("Mm," on face23be l1) is left out. Prints a JSON list, one entry per take: sha256, frames, fps, words, speech [start, end], cleanFrom,
+ad-lib before them ("Mm," on face23be l1) is left out. --out FILE writes the list to FILE as well (a new file; the render
+worker's measure job reads it there). Prints a JSON list, one entry per take: sha256, frames, fps, words, speech [start, end], cleanFrom,
 fromFrame, toFrame, rule, or {path, refused} for a take with no speech. Exit 0, or 2 when any take was refused.
 
 The rule (r3's hand cut, remake-film3-20261108/verify/plan2.py, made automatic):
@@ -113,6 +114,11 @@ def measure(path, words=None, work=None, text=None):
 
 def main(argv):
     paths, maps = list(argv), {}
+    dest = None
+    if '--out' in paths:
+        i = paths.index('--out')
+        dest = paths[i + 1]
+        del paths[i:i + 2]
     for flag in ('--words', '--lines'):
         if flag in paths:
             i = paths.index(flag)
@@ -131,6 +137,9 @@ def main(argv):
             out.append({'path': p, 'refused': str(e)})
             refused = True
     print(json.dumps(out, indent=1))
+    if dest:
+        with open(dest, 'x', encoding='utf-8') as fh:
+            json.dump(out, fh)
     return 2 if refused else 0
 
 
