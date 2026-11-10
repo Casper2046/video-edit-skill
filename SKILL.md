@@ -151,7 +151,14 @@ takes and pictures, each matched by sha256. Every graphic's cue (line id + word 
 resolved on the render transcript; a missing or ambiguous cue, or a hold past its take, refuses (exit 2) naming the graphic id.
 The film is built from the pinned kit (`kits/<kit>/`, HyperFrames 0.9.23, GSAP 3.15.0, 24 fps) and `<out>/evidence/` gets the
 resolved timeline, the timing table (each graphic's measured first/last frame against its rule), the frame-per-word sheet and
-the cue-frame sheet.
+the cue-frame sheet. A graphic enters on the first frame at or after its cue word's onset and never before the kit's caption
+shows that word (the caption on its first frame must be its cue word). Kit film3-r3.2 has r3's pieces only (contract C): `photo_panel` (one or two pictures in the preset's slots,
+writing where a picture's `meta.writing` says), `top_band_broll` (trim, frame, crop, anchor, pan keyframes or zoom from the
+b-roll's `meta`; the take slides down by its `meta.topBandShiftPx` and back up if the band leaves before the cut), `circle`
+(round a box stored with its take, `meta.targets`) and one persistent `step_counter` (updates `1/3`, `2/3`, `3/3` and `pulse`
+in place on their cue words). Any other treatment, layout or update is refused as unsupported, a malformed graphic is refused
+by its id, and every cue carries its words. `holdUntilLineEnd` ends a graphic on its line's cut. Each counter state is measured
+where its number changes and held as an overlay (>= 1.5 s); text on a picture is held >= 1.0 s + 0.3 s a word.
 
 Checks measured on the render: the `render` stage renders the page twice, the film and then an overlays-only copy
 (`work/overlays.html`: no video or audio, captions tagged one colour, text shadows another) as an RGBA PNG sequence in
