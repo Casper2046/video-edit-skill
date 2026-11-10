@@ -188,9 +188,10 @@ class Captions(unittest.TestCase):
             P.caption_groups(pk, P.layout(pk, 24)[0], 24)
         self.assertIn('a', str(e.exception))
 
-    def test_a_line_without_groups_breaks_after_punctuation_or_three_words_with_no_accent(self):
+    def test_a_line_without_groups_breaks_after_punctuation_or_three_words_and_accents_the_word_that_ends_a_phrase(self):
+        # r3's accents fall mostly on phrase-final words ("full?", "hacks.", "table?", "phone.", "room,", "reach.", "page.")
         self.assertEqual(P.default_groups('Stand up and press your feet into the floor, like you are pushing it away.'),
-                         'Stand up and | press your feet | into the floor, | like you are | pushing it away.')
+                         'Stand up and | press your feet | into the floor,* | like you are | pushing it away.*')
 
     def test_a_group_too_wide_for_the_action_column_is_set_smaller_by_its_real_glyph_widths(self):
         # face23be l3 "Name something you": r3's 0.6 em a character gave 75 px, its ink reached x 983 past the Reels action

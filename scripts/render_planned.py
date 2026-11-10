@@ -137,10 +137,11 @@ PUNCT = tuple(',.?!;:')
 
 
 def default_groups(text):
-    """caption groups for a line without its own: a break after punctuation or every three words, no accent"""
+    """caption groups for a line without its own: a break after punctuation or every three words; the word that ends a
+    phrase (its punctuation) is the group's accent, where most of r3's accents fall ("full?", "phone.", "room,", "page.")"""
     groups, cur = [], []
     for t in text.split():
-        cur.append(t)
+        cur.append(t + ('*' if t.endswith(PUNCT) else ''))
         if t.endswith(PUNCT) or len(cur) == 3:
             groups.append(' '.join(cur))
             cur = []
