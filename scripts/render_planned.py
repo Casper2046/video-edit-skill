@@ -12,8 +12,12 @@ cue word's onset and not before the kit's caption shows that word -> compose ind
 placements in wrappers the top band slides, captions unchanged, one piece per graphic, the step counter as one element
 with timed updates) -> render (HyperFrames + GSAP at the pin, local GSAP, no CDN) -> render each graphic alone as RGBA
 frames and measure the frames it is on screen (and, for the counter, the frame each update changes it) -> timing table
-vs the rules -> sheets. Writes <out>/renders/<slug>-planned.mp4, <out>/qa-report.json (with stage times) and
-<out>/evidence/*.
+vs the rules -> gates by class (contract D, GATES): render the base (the film without graphics or captions, presenter
+moves kept) and find the face on it; media, graphic text and annotations keep clear of that face and are visible on the
+film itself at their cue frames; the captions rendered alone stay inside the Reels safe
+zone; every script word is heard, in order, on the film's own audio -> sheets. Writes <out>/renders/<slug>-planned.mp4,
+<out>/qa-report.json (with stage times) and <out>/evidence/* (gates.json: each check's measurements). A failure names
+the graphic id (or captions, or words) and the check.
 Exit: 0 every check passes, 1 a timing check failed, 2 refused (the graphic id is in the message), 3 a stage failed.
 HyperFrames: VIDEO_EDIT_HYPERFRAMES_PLANNED (a hyperframes binary at the pinned version), else npx hyperframes@<pin>.
 """
@@ -47,6 +51,23 @@ UPDATE_WINDOW = 6               # frames either side of a counter update's cue f
 EPS = 0.0005                    # hosts and main-timeline events start this much before their frame's time, so a time-0 set
                                 # (or one at an exact frame time rounded up to 6 decimals) applies on that frame
 FONTS = ('Poppins-800-latin.woff2', 'Caveat-700-latin.woff2')
+# contract D: gate policies by class, measured on renders. Captions keep the existing safe zone (build_reel's Reels zone,
+# on the captions' rendered ink); graphic text, annotations and (lead 10 Nov) media panels and bands get face clearance
+# and a visible-on-the-film check at their cue frames. The top band's exemption from the Reels top margin is named here.
+GATES_NOTE = ("safe zone for captions only: graphics' and media's positions are recorded, not enforced (r3, approved by "
+              'Andy, puts its circle under the Reels bottom margin and its photo panel past the right margin)')
+GATES = {
+    'captions': {'class': 'caption', 'checks': ['safe zone'], 'zone': 'reels'},
+    'photo_panel': {'class': 'media panel', 'checks': ['face clearance', 'visible on the film']},
+    'top_band_broll': {'class': 'media band', 'checks': ['face clearance', 'visible on the film'],
+                       'exemptions': ["the Reels top margin (y < 220): the band sits at the top of the frame, as r3's shelf "
+                                      'band does at top:0']},
+    'circle': {'class': 'annotation', 'checks': ['face clearance', 'visible on the film']},
+    'step_counter': {'class': 'graphic text', 'checks': ['face clearance', 'visible on the film']},
+}
+FACE_STEP = 3                   # face clearance samples every 3rd frame, as spec mode's reel_check
+VIS_DIFF = 40                   # a graphic pixel counts when it changes the picture under it by more than this (0-255)
+VIS_SHARE = .75                 # visible on the film: this share of those pixels show the graphic, not the picture under it
 
 
 class Refused(Exception):
@@ -173,6 +194,8 @@ def check_graphic(gr, lines, kit):
     spec = kit['treatments'].get(gr['treatment'])
     if not spec or spec.get('persistent') or gr['layout'] != spec['layout']:
         raise unsupported(gid, f"treatment {gr['treatment']} on layout {gr['layout']}", kit)
+    if gr['treatment'] not in GATES:
+        raise unsupported(gid, f"treatment {gr['treatment']} with no gate policy (contract D)", kit)
     line = lines.get(gr['cue'].get('lineId'))
     if not line:
         raise Refused(f"{gid}: cue line {gr['cue'].get('lineId')} is not in the packet")
@@ -188,6 +211,8 @@ def check_persistent(p, lines, kit):
     spec = kit['treatments'].get(p['treatment'])
     if not spec or not spec.get('persistent') or p['layout'] != spec['layout']:
         raise unsupported(pid, f"persistent {p['treatment']} on layout {p['layout']}", kit)
+    if p['treatment'] not in GATES:
+        raise unsupported(pid, f"persistent {p['treatment']} with no gate policy (contract D)", kit)
     if p['untilLineEnd'] not in lines:
         raise Refused(f"{pid}: untilLineEnd {p['untilLineEnd']} is not a line of the packet")
     steps, count = kit['stepCounter']['steps'], 0
@@ -406,6 +431,131 @@ def timing_table(resolved, measured, fps, captions=None):
     return rows, failures
 
 
+# ------------------------------------------------------------------ rendered checks by class (contract D)
+def face_clearance(r, ms, faces, line_at):
+    """(info, failures) for one graphic: on each sampled frame (faces: {frame: face box or None}, found on the base
+    render) where it is shown and settled (its outline not moving), fewer than MIN_PIXELS of its pixels (ms['face']:
+    {frame: px inside that box}) sit inside the face box. Such a frame with no face found fails as unchecked; a line
+    with no face on any sampled frame has none to clear. Pixels over the face while it moves are information."""
+    shown, moving, px = set(ms.get('shown', [])), set(ms.get('moving', [])), ms.get('face') or {}
+    has_face = {line_at.get(i) for i, b in faces.items() if b is not None}
+    over, unchecked, moved, checked = [], [], [], 0
+    for i in sorted(faces):
+        if i not in shown or line_at.get(i) not in has_face:
+            continue
+        if i in moving:
+            if faces[i] is not None and (px.get(i) or 0) >= MIN_PIXELS:
+                moved.append(px[i])
+            continue
+        if faces[i] is None:
+            unchecked.append(i)
+            continue
+        checked += 1
+        if (px.get(i) or 0) >= MIN_PIXELS:
+            over.append(i)
+    info = {'checkedFrames': checked, 'overFaceFrames': over, 'maxPx': max([px[i] for i in over] or [0]),
+            'uncheckedFrames': unchecked, 'movingOverFace': {'frames': len(moved), 'maxPx': max(moved or [0])}}
+    failures = []
+    if over:
+        f = over[0]
+        failures.append(f"{r['id']}: face clearance: covers the face on {len(over)} of {checked} settled sampled frames "
+                        f"(first frame {f}: {px[f]} px of it inside the face box {[round(v) for v in faces[f]]})")
+    if unchecked:
+        failures.append(f"{r['id']}: face clearance: no face found on frame {unchecked[0]} of line {line_at.get(unchecked[0])} "
+                        f"({len(unchecked)} frames) to check it against, while the line shows a face elsewhere")
+    return info, failures
+
+
+def visible_pixels(alone, film, base):
+    """(pixels where the graphic changes the picture, of those the ones the film shows): alone = the graphic's RGBA frame
+    rendered alone, base = the same frame of the film without graphics or captions, film = the film's frame. Expected =
+    the graphic over the base; a pixel shows the graphic when the film is closer to that than to the base."""
+    import numpy as np
+    a = alone[:, :, 3:4].astype(np.float32) / 255
+    g, b, f = (x[:, :, :3].astype(np.float32) for x in (alone, base, film))
+    want = g * a + b * (1 - a)
+    count = (alone[:, :, 3] > ALPHA) & (np.abs(want - b).max(axis=2) > VIS_DIFF)
+    shows = np.abs(f - want).mean(axis=2) < np.abs(f - b).mean(axis=2)
+    return int(count.sum()), int((count & shows).sum())
+
+
+def visible_rows(gid, checks):
+    """(rows, failures): each check frame ({frame, what, px, shown}) passes when the graphic changes MIN_PIXELS+ pixels
+    there and VIS_SHARE of them show on the film"""
+    rows, failures = [], []
+    for c in checks:
+        share = c['shown'] / c['px'] if c['px'] else 0.0
+        row = {**c, 'share': round(share, 4), 'pass': c['px'] >= MIN_PIXELS and share >= VIS_SHARE}
+        rows.append(row)
+        if c['px'] < MIN_PIXELS:
+            failures.append(f"{gid}: visible on the film: at its cue frame {c['frame']} ({c['what']}) it changes {c['px']} px of "
+                            f'the picture, too few to check')
+        elif not row['pass']:
+            failures.append(f"{gid}: visible on the film: at its cue frame {c['frame']} ({c['what']}) only {share:.0%} of its "
+                            f"{c['px']} px show on the film (the rule is >= {VIS_SHARE:.0%}): hidden or covered")
+    return rows, failures
+
+
+def cue_frames(rows, gid):
+    """[(frame, what)]: the cue frames of a graphic's timing rows (the graphic's, then each counter update's), once each"""
+    out = []
+    for row in rows:
+        if row['id'] != gid or row['cueOnsetFrame'] in [f for f, _ in out]:
+            continue
+        out.append((row['cueOnsetFrame'], (f"{row['update']} " if row.get('update') else '') + f"'{row['cue']['words']}'"))
+    return out
+
+
+def margin_side(zone, box):
+    """the first Reels margin a box crosses (top, bottom, left, right), None when inside"""
+    from build_reel import H, right_edge
+    x0, y0, x1, y1 = box
+    for side, bad in (('top', y0 < zone['top']), ('bottom', y1 > H - zone['bottom']), ('left', x0 < zone['left'] - .5),
+                      ('right', x1 > right_edge(zone, y0, y1) + .5)):
+        if bad:
+            return side
+    return None
+
+
+def caption_safe_zone(frames, caps, zone=None):
+    """(info, failures): every box of the captions' rendered ink ({frame: [box]}, from the captions rendered alone) inside
+    the existing Reels safe zone (build_reel PLATFORMS), on every frame; one failure naming each caption word with ink outside"""
+    from build_reel import PLATFORMS
+    zone = zone or PLATFORMS[GATES['captions']['zone']]
+    bad = {}
+    for i in sorted(frames):
+        for b in frames[i]:
+            side = margin_side(zone, b)
+            if side:
+                k = max([j for j, (_, f) in enumerate(caps) if f <= i] or [0])
+                bad.setdefault(k, (i, b, side))
+    info = {'framesWithInk': sum(1 for v in frames.values() if v), 'zone': zone,
+            'outside': [{'word': caps[k][0], 'frame': i, 'box': b, 'margin': s} for k, (i, b, s) in sorted(bad.items())]}
+    if not bad:
+        return info, []
+    k = min(bad)
+    i, b, side = bad[k]
+    return info, [f"captions: safe zone: {len(bad)} caption words have ink outside the Reels safe zone, first '{caps[k][0]}' "
+                  f'on frame {i}: ink {b} past the {side} margin']
+
+
+def words_on_film(pk, transcript):
+    """(info, failures): every script word heard, in order, on the rendered film's audio (its own transcript; the
+    captions are not read)"""
+    tokens, owner = [], []
+    for ln in pk['lines']:
+        for j, t in enumerate(ln['text'].split()):
+            tokens.append(t)
+            owner.append(f"{ln['id']} word {j} '{t}'")
+    heard = align(tokens, transcript)
+    missing = [owner[k] for k, h in enumerate(heard) if h is None]
+    info = {'scriptWords': len(tokens), 'heard': len(tokens) - len(missing), 'notHeard': missing}
+    if not missing:
+        return info, []
+    return info, [f"words: {info['heard']}/{len(tokens)} script words heard on the film's audio (in order); not heard: "
+                  + ', '.join(missing)]
+
+
 # ------------------------------------------------------------------ media
 def sha256(path):
     h = hashlib.sha256()
@@ -451,9 +601,27 @@ def run(cmd, log=None, **kw):
     return p
 
 
+_WHISPER = []
+
+
+def heard_words(wav):
+    """medium.en words with their times in a 16 kHz mono wav (the model is loaded once)"""
+    if not _WHISPER:
+        from faster_whisper import WhisperModel
+        _WHISPER.append(WhisperModel('medium.en', device='cpu', compute_type='int8'))
+    segs, _ = _WHISPER[0].transcribe(wav, word_timestamps=True, vad_filter=False)
+    return [{'text': w.word.strip(), 'start': round(w.start, 3), 'end': round(w.end, 3)} for s in segs for w in s.words]
+
+
+def film_transcript(film, work):
+    """the rendered film's own audio, transcribed (the words check reads this, not the captions)"""
+    wav = os.path.join(work, 'film.wav')
+    run([skillenv.tool('ffmpeg'), '-loglevel', 'error', '-y', '-i', film, '-vn', '-ac', '1', '-ar', '16000', wav])
+    return heard_words(wav)
+
+
 def transcribe(pk, files, kit, work):
     """the render transcript: the takes as cut (the kit's placements) in one track, medium.en words in film time"""
-    from faster_whisper import WhisperModel
     ins, chains = [], []
     for i, ln in enumerate(pk['lines']):
         t = kit['takes'][ln['id']]
@@ -463,9 +631,7 @@ def transcribe(pk, files, kit, work):
     graph = ';'.join(chains) + ';' + ''.join(f'[a{i}]' for i in range(len(chains))) + f'concat=n={len(chains)}:v=0:a=1[out]'
     run([skillenv.tool('ffmpeg'), '-loglevel', 'error', '-y', *ins, '-filter_complex', graph, '-map', '[out]', '-ac', '1',
          '-ar', '16000', wav])
-    m = WhisperModel('medium.en', device='cpu', compute_type='int8')
-    segs, _ = m.transcribe(wav, word_timestamps=True, vad_filter=False)
-    return [{'text': w.word.strip(), 'start': round(w.start, 3), 'end': round(w.end, 3)} for s in segs for w in s.words]
+    return heard_words(wav)
 
 
 def hyperframes():
@@ -751,10 +917,20 @@ def build(pk, files, resolved, kit, proj, masks):
         if t == 'top_band_broll':
             main += presenter_tweens(kit, r, take, fps)
     head = HEAD.replace('__DUR__', str(dur)).replace('__FPS__', str(fps))
+    caption_host = host('captions', 'compositions/captions.html', 0, round(dur * fps), fps, 5, 'captions', 20)
     with open(os.path.join(proj, 'index.html'), 'w', encoding='utf-8') as fh:
-        fh.write(head.replace('__BG__', '#000') + takes + ''.join(hosts.values())
-                 + host('captions', 'compositions/captions.html', 0, round(dur * fps), fps, 5, 'captions', 20)
+        fh.write(head.replace('__BG__', '#000') + takes + ''.join(hosts.values()) + caption_host
                  + TAIL.replace('__DUR__', str(dur)).replace('__MAIN__', main))
+    # the base (contract D): the film without graphics or captions, presenter moves kept, so a face a graphic covers
+    # in the film is still found, and the film can be compared with what it shows under each graphic
+    base = os.path.join(os.path.dirname(masks), 'base')
+    for rel in [f"assets/takes/{ln['id']}.mp4" for ln in pk['lines']] + ['assets/vendor/gsap.min.js']:
+        os.makedirs(os.path.dirname(os.path.join(base, rel)), exist_ok=True)
+        if os.path.isfile(os.path.join(proj, rel)):
+            shutil.copyfile(os.path.join(proj, rel), os.path.join(base, rel))
+    with open(os.path.join(base, 'index.html'), 'w', encoding='utf-8') as fh:
+        fh.write(head.replace('__BG__', '#000') + takes + TAIL.replace('__DUR__', str(dur)).replace('__MAIN__', main))
+    hosts['captions'], needs['captions'] = caption_host, ['compositions/captions.html']
     for gid, rels in needs.items():
         mp = os.path.join(masks, gid)
         for rel in rels + ['assets/vendor/gsap.min.js'] + [f'assets/fonts/{f}' for f in FONTS]:
@@ -766,17 +942,25 @@ def build(pk, files, resolved, kit, proj, masks):
 
 
 # ------------------------------------------------------------------ measuring and sheets
-def measure(frames_dir, regions=None):
+def measure(frames_dir, regions=None, faces=None, boxes=False):
     """per RGBA frame (0 = the film's first frame): `shown` (16+ px with alpha over 32) and `moving` (its alpha differs
     from the frame before: the graphic's outline moves); per named region (box, kind): the frames whose pixels in the box
-    differ from the frame before ('change') or that show the accent colour ('accent': red - blue and green over minimums)"""
+    differ from the frame before ('change') or that show the accent colour ('accent': red - blue and green over minimums);
+    `face` {frame: px with alpha over 32 inside that frame's face box, None with no face} for the frames in faces; with
+    boxes, `boxes` {frame: [its alpha-over-32 regions of MIN_AREA+ px]} (overlay_mask's regions, text shadows included)"""
     import numpy as np
     from PIL import Image
-    shown, moving, prev = [], [], None
+    from overlay_mask import components
+    shown, moving, prev, face, regs = [], [], None, {}, {}
     found = {name: [] for name in regions or {}}
     for i, f in enumerate(sorted(glob.glob(os.path.join(frames_dir, '*.png')))):
         full = np.asarray(Image.open(f).convert('RGBA'))
         alpha = full[:, :, 3].astype(np.int16)
+        if i in (faces or {}):
+            b = faces[i]
+            face[i] = None if b is None else int((alpha[int(b[1]):int(b[3]), int(b[0]):int(b[2])] > ALPHA).sum())
+        if boxes:
+            regs[i] = components(alpha > ALPHA)
         if int((alpha > ALPHA).sum()) >= MIN_PIXELS:
             shown.append(i)
             if prev is not None and int((np.abs(alpha - prev[0]) > ALPHA).sum()) >= MIN_PIXELS:
@@ -792,7 +976,57 @@ def measure(frames_dir, regions=None):
             if hit:
                 found[name].append(i)
         prev = (alpha, {name: full[b[1]:b[3], b[0]:b[2]].astype(np.int16) for name, (b, _, _) in (regions or {}).items()})
-    return {'shown': shown, 'moving': moving, 'regions': found}
+    return {'shown': shown, 'moving': moving, 'regions': found, 'face': face, **({'boxes': regs} if boxes else {})}
+
+
+def base_faces(base, detect=None):
+    """{frame: face box (YuNet, faces.py) grown by FACE_MARGIN, in 1080x1920 pixels, or None} on every FACE_STEP-th frame of
+    the base render (the presenter unobstructed). detect: a stand-in for tests"""
+    import numpy as np
+    import faces as F
+    if detect is None:
+        import onnxruntime as ort
+        session = ort.InferenceSession(F.ensure_model(), providers=['CPUExecutionProvider'])
+        detect = lambda img: F.detect(session, img)            # noqa: E731
+    raw = subprocess.run([skillenv.tool('ffmpeg'), '-v', 'error', '-i', base, '-vf', f"select='not(mod(n\\,{FACE_STEP}))',scale=360:640",
+                          '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True, check=True).stdout
+    out, mg = {}, F.FACE_MARGIN
+    for k, img in enumerate(np.frombuffer(raw, np.uint8).reshape(-1, 640, 360, 3)):
+        pad = np.zeros((F.SIDE, F.SIDE, 3), np.uint8)
+        pad[:, :360] = img
+        hit = detect(pad)
+        out[k * FACE_STEP] = None if hit is None else [max(0, hit[1][0] * 3 - mg), max(0, hit[1][1] * 3 - mg),
+                                                       min(1080, hit[1][2] * 3 + mg), min(1920, hit[1][3] * 3 + mg)]
+    return out
+
+
+def line_frames(kit):
+    """{film frame: the line whose take is on screen}"""
+    fps = kit['fps']
+    return {f: lid for lid, t in kit['takes'].items()
+            for f in range(round(t['start'] * fps), round((t['start'] + t['duration']) * fps))}
+
+
+def visible_checks(rows, resolved, film, base, work):
+    """{graphic id: [{frame, what, px, shown}]} for the graphics whose class has the visible-on-the-film check: at each
+    cue frame, the graphic rendered alone against the film's frame and the base's"""
+    import numpy as np
+    from PIL import Image
+    want = {r['id']: cue_frames(rows, r['id']) for r in resolved if 'visible on the film' in GATES[r['treatment']]['checks']}
+    idx = sorted({f for v in want.values() for f, _ in v})
+    if not idx:
+        return {}
+    fpng = frames_at(film, idx, os.path.join(work, 'vis-film'), '1080:1920')
+    bpng = frames_at(base, idx, os.path.join(work, 'vis-base'), '1080:1920')
+    out = {}
+    for gid, marks in want.items():
+        alone = sorted(glob.glob(os.path.join(work, f'mask-{gid}', '*.png')))
+        out[gid] = []
+        for f, what in marks:
+            px, shown = visible_pixels(*(np.asarray(Image.open(p).convert(m)) for p, m in
+                                         ((alone[f], 'RGBA'), (fpng[f], 'RGB'), (bpng[f], 'RGB'))))
+            out[gid].append({'frame': f, 'what': what, 'px': px, 'shown': shown})
+    return out
 
 
 def counter_regions(kit):
@@ -899,15 +1133,21 @@ def load(packet_path, shots_dir):
         raise Refused(f'cannot read the packet ({type(e).__name__}: {e})')
 
 
-def render_masks(resolved, masks, work, hf, env, kit):
-    """each graphic rendered alone (RGBA frames) and measured"""
+def render_alone(gid, masks, work, hf, env, fps):
+    """one piece rendered alone as RGBA frames -> their folder"""
+    print(f"== render: {gid} alone (RGBA frames)", flush=True)
+    frames = os.path.join(work, f"mask-{gid}")
+    run(hf + ['render', '--format', 'png-sequence', '--fps', str(fps), '-o', frames], log=os.path.join(work, f"mask-{gid}.log"),
+        cwd=os.path.join(masks, gid), env=env)
+    return frames
+
+
+def render_masks(resolved, masks, work, hf, env, kit, faces=None):
+    """each graphic rendered alone (RGBA frames) and measured, with its pixels inside each sampled face box"""
     measured, fps = {}, kit['fps']
     for r in resolved:
-        print(f"== render: {r['id']} alone (RGBA frames)", flush=True)
-        frames = os.path.join(work, f"mask-{r['id']}")
-        run(hf + ['render', '--format', 'png-sequence', '--fps', str(fps), '-o', frames], log=os.path.join(work, f"mask-{r['id']}.log"),
-            cwd=os.path.join(masks, r['id']), env=env)
-        measured[r['id']] = measure(frames, counter_regions(kit) if r['treatment'] == 'step_counter' else None)
+        frames = render_alone(r['id'], masks, work, hf, env, fps)
+        measured[r['id']] = measure(frames, counter_regions(kit) if r['treatment'] == 'step_counter' else None, faces)
     return measured
 
 
@@ -946,23 +1186,69 @@ def main(packet_path, shots_dir, out):
     t1 = time.time()
     run(hf + ['render', '--quality', 'high', '--fps', str(fps), '-o', film], log=os.path.join(work, 'render.log'), cwd=proj, env=env)
     times['filmRenderSec'] = round(time.time() - t1, 1)
+    print('== render: base (the film without graphics or captions)', flush=True)
     t1 = time.time()
-    measured = render_masks(resolved, masks, work, hf, env, kit)
+    base = os.path.join(work, 'base.mp4')
+    run(hf + ['render', '--quality', 'high', '--fps', str(fps), '-o', base], log=os.path.join(work, 'base-render.log'),
+        cwd=os.path.join(out, 'base'), env=env)
+    times['baseRenderSec'] = round(time.time() - t1, 1)
+    t1 = time.time()
+    faces = base_faces(base)
+    times['facesSec'] = round(time.time() - t1, 1)
+    t1 = time.time()
+    measured = render_masks(resolved, masks, work, hf, env, kit, faces)
     times['maskRenderAndMeasureSec'] = round(time.time() - t1, 1)
+    t1 = time.time()
+    cap_boxes = measure(render_alone('captions', masks, work, hf, env, fps), boxes=True)['boxes']
+    times['captionsRenderAndMeasureSec'] = round(time.time() - t1, 1)
     rows, failures = timing_table(resolved, measured, fps, caps)
     info = json.loads(run([skillenv.tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries',
                            'stream=r_frame_rate,nb_read_frames,width,height:format=duration', '-of', 'json', film]).stdout)
     st = info['streams'][0]
     if st['r_frame_rate'] != f'{fps}/1' or (st['width'], st['height']) != (1080, 1920):
         failures.append(f"film is {st['width']}x{st['height']} at {st['r_frame_rate']} fps, not 1080x1920 at {fps}")
-    tokens, heard = word_sheet(pk, transcript, {r['id']: set(measured[r['id']]['shown']) for r in resolved}, film, fps, work, ev)
+    print('== transcribe: medium.en on the film\'s own audio', flush=True)
+    t1 = time.time()
+    heard_film = film_transcript(film, work)
+    times['filmTranscribeSec'] = round(time.time() - t1, 1)
+    t1 = time.time()
+    gates, gate_failures, at = {'faceClearance': {}, 'visibleOnFilm': {}}, [], line_frames(kit)
+    for r in resolved:
+        if 'face clearance' in GATES[r['treatment']]['checks']:
+            gates['faceClearance'][r['id']], bad = face_clearance(r, measured[r['id']], faces, at)
+            gate_failures += bad
+    for gid, checks in visible_checks(rows, resolved, film, base, work).items():
+        gates['visibleOnFilm'][gid], bad = visible_rows(gid, checks)
+        gate_failures += bad
+    gates['captions'], bad = caption_safe_zone(cap_boxes, caps)
+    gate_failures += bad
+    gates['words'], bad = words_on_film(pk, heard_film)
+    gate_failures += bad
+    times['gatesSec'] = round(time.time() - t1, 1)
+    failures += gate_failures
+    dump(os.path.join(ev, 'gates.json'), {
+        'policies': GATES, 'note': GATES_NOTE, 'faceStep': FACE_STEP, 'rules': {
+            'face clearance': f'on every {FACE_STEP}rd frame where a graphic is shown and settled, fewer than {MIN_PIXELS} of its '
+                              'pixels inside the face box (YuNet on the base render, grown by faces.FACE_MARGIN); a frame with no '
+                              'face found on a line that has one fails as unchecked; pixels over the face while it moves are information',
+            'visible on the film': f'at each cue frame, of the pixels where the graphic rendered alone changes the base render by '
+                                   f'more than {VIS_DIFF}, at least {VIS_SHARE:.0%} on the film are closer to the graphic over the '
+                                   'base than to the base',
+            'safe zone': 'every region of the captions rendered alone (alpha > 32, text shadows included) inside the Reels zone, '
+                         'every frame',
+            'words': "every script word heard, in order, on the rendered film's audio (medium.en); captions not read"},
+        **gates, 'failures': gate_failures})
+    tokens, heard = word_sheet(pk, heard_film, {r['id']: set(measured[r['id']]['shown']) for r in resolved}, film, fps, work, ev)
     cue_sheet(rows, film, int(st['nb_read_frames']), fps, work, ev)
     dump(os.path.join(ev, 'resolved-timeline.json'), {
         'pin': PIN, 'packetEngine': pk['versions']['engine'], 'kit': kit['kit'], 'fps': fps, 'duration': kit['duration'],
         'takes': [{'lineId': ln['id'], 'takeId': ln['take']['id'], 'sha256': ln['take']['sha256'], **kit['takes'][ln['id']]}
                   for ln in pk['lines']],
-        'transcript': {'model': 'faster-whisper medium.en int8', 'words': transcript, 'scriptWords': len(tokens),
-                       'scriptWordsHeard': sum(h is not None for h in heard)},
+        'transcript': {'model': 'faster-whisper medium.en int8', 'of': 'the takes as cut (cues resolve on it)',
+                       'words': transcript, 'scriptWords': len(tokens),
+                       'scriptWordsHeard': sum(h is not None for h in align(tokens, transcript))},
+        'filmTranscript': {'model': 'faster-whisper medium.en int8', 'of': "the rendered film's audio (the words check)",
+                           'words': heard_film, 'scriptWords': len(tokens), 'scriptWordsHeard': sum(h is not None for h in heard)},
         'graphics': [{**r, 'startSec': r['startFrame'] / fps, 'durationSec': r['frames'] / fps} for r in resolved],
         'captions': {'piece': 'captions.html', 'sha256': sha256(os.path.join(proj, 'compositions', 'captions.html'))},
         'gsapSha256': GSAP_SHA, 'film': {'path': os.path.relpath(film, out), 'sha256': sha256(film), 'probe': info}})

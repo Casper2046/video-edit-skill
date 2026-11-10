@@ -322,8 +322,9 @@ class Media(unittest.TestCase):
             self.assertIn('l2', str(e.exception))
 
 
-def m(shown, moving=(), **regions):
-    return {'shown': list(shown), 'moving': list(moving), 'regions': {k: list(v) for k, v in regions.items()}}
+def m(shown, moving=(), face=None, **regions):
+    return {'shown': list(shown), 'moving': list(moving), 'regions': {k: list(v) for k, v in regions.items()},
+            'face': dict(face or {})}
 
 
 class TimingTable(unittest.TestCase):
@@ -436,6 +437,173 @@ class Build(unittest.TestCase):
             with open(os.path.join(d, 'proj', 'compositions', 'p-counter.html')) as fh:
                 piece = fh.read()
             self.assertEqual(re.findall(r'step\((\d), ([\d.]+)\)', piece), [('2', '1.875000'), ('3', '4.375000')])   # 197-152, 257-152
+
+
+class GatePolicies(unittest.TestCase):
+    """contract D: gate policies by class; every kit piece has one, and the top band's exemption is named"""
+    def test_every_kit_piece_and_the_captions_have_a_policy_by_class(self):
+        self.assertEqual({k: v['class'] for k, v in P.GATES.items()},
+                         {'captions': 'caption', 'photo_panel': 'media panel', 'top_band_broll': 'media band',
+                          'circle': 'annotation', 'step_counter': 'graphic text'})
+        self.assertEqual(P.GATES['captions']['checks'], ['safe zone'])
+        for t in ('photo_panel', 'top_band_broll', 'circle', 'step_counter'):      # lead 10 Nov: media panels and bands too
+            self.assertEqual(P.GATES[t]['checks'], ['face clearance', 'visible on the film'])
+        self.assertIn('Reels top margin', ' '.join(P.GATES['top_band_broll']['exemptions']))
+        self.assertIn('recorded, not enforced', P.GATES_NOTE)        # lead 10 Nov: safe zone for captions only
+        self.assertEqual(set(KIT['treatments']) - set(P.GATES), set())
+
+    def test_a_kit_piece_with_no_gate_policy_refuses_as_unsupported(self):
+        kit = {**KIT, 'treatments': {**KIT['treatments'], 'word_card': {'layout': 'overlay', 'pictures': [0, 0]}}}
+        with self.assertRaises(P.Refused) as e:
+            P.check_packet(packet(g({'lineId': 'l3', 'from': 1, 'to': 1, 'words': 'phone'}, 'g-card', treatment='word_card',
+                                    layout='overlay')), kit)
+        self.assertIn('g-card', str(e.exception))
+        self.assertIn('gate policy', str(e.exception))
+
+
+FACE = [400, 500, 700, 900]                        # a face box in the 1080x1920 frame, FACE_MARGIN already added
+
+
+class FaceClearance(unittest.TestCase):
+    """media, graphic text and annotations: none of the graphic's settled pixels inside the face box found on the base
+    render (the takes as placed, presenter moves included, no graphics: a graphic over the face cannot hide it)"""
+    def r(self, gid='g-shelf', treatment='top_band_broll'):
+        return {'id': gid, 'treatment': treatment, 'lineId': 'l3'}
+
+    def test_a_graphic_clear_of_the_face_passes(self):
+        info, failures = P.face_clearance(self.r(), m(range(10, 40), face={12: 0, 15: 0, 18: 0}), {12: FACE, 15: FACE, 18: FACE},
+                                          {f: 'l3' for f in range(50)})
+        self.assertEqual(failures, [])
+        self.assertEqual(info['checkedFrames'], 3)
+
+    def test_a_graphic_covering_the_face_fails_naming_the_graphic_the_check_and_the_frame(self):
+        info, failures = P.face_clearance(self.r(), m(range(10, 40), face={12: 0, 15: 5000, 18: 5000}),
+                                          {12: FACE, 15: FACE, 18: FACE}, {f: 'l3' for f in range(50)})
+        (f,) = failures
+        self.assertTrue(f.startswith('g-shelf: face clearance:'), f)
+        self.assertIn('frame 15', f)
+        self.assertIn('2 of 3', f)
+
+    def test_pixels_over_the_face_while_the_graphic_moves_in_are_information_only(self):
+        info, failures = P.face_clearance(self.r(), m(range(10, 40), moving=range(10, 16), face={12: 900, 15: 900, 18: 0}),
+                                          {12: FACE, 15: FACE, 18: FACE}, {f: 'l3' for f in range(50)})
+        self.assertEqual(failures, [])
+        self.assertEqual(info['movingOverFace'], {'frames': 2, 'maxPx': 900})
+
+    def test_a_sampled_frame_with_no_face_found_on_a_line_that_has_one_cannot_be_checked_and_fails(self):
+        _, failures = P.face_clearance(self.r(), m(range(10, 40), face={12: 0, 15: None}), {12: FACE, 15: None},
+                                       {f: 'l3' for f in range(50)})
+        (f,) = failures
+        self.assertIn('g-shelf: face clearance:', f)
+        self.assertIn('no face found', f)
+
+    def test_a_line_with_no_face_on_any_sampled_frame_has_none_to_clear(self):
+        info, failures = P.face_clearance(self.r(), m(range(10, 40), face={12: None, 15: None}), {12: None, 15: None},
+                                          {f: 'l3' for f in range(50)})
+        self.assertEqual(failures, [])
+        self.assertEqual(info['checkedFrames'], 0)
+
+
+def rgba(h=40, w=40):
+    import numpy as np
+    return np.zeros((h, w, 4), np.uint8)
+
+
+class VisibleOnFilm(unittest.TestCase):
+    """graphic text and annotations: at their cue frames the graphic's pixels are on the film itself (the film, not the
+    graphic rendered alone: a graphic hidden or covered in the film fails)"""
+    def scene(self):
+        import numpy as np
+        base = np.full((40, 40, 3), 90, np.uint8)
+        alone = rgba()
+        alone[10:20, 10:30] = (196, 22, 28, 255)               # a red stroke
+        film = base.copy()
+        film[10:20, 10:30] = (190, 30, 30)                     # the film shows it (compression moves colours a little)
+        return alone, film, base
+
+    def test_a_graphic_drawn_on_the_film_is_visible(self):
+        alone, film, base = self.scene()
+        px, shown = P.visible_pixels(alone, film, base)
+        self.assertEqual((px, shown), (200, 200))
+
+    def test_a_graphic_missing_from_the_film_is_not(self):
+        alone, film, base = self.scene()
+        px, shown = P.visible_pixels(alone, base.copy(), base)
+        self.assertEqual((px, shown), (200, 0))
+
+    def test_a_graphic_covered_by_something_else_on_the_film_is_not(self):
+        alone, film, base = self.scene()
+        film[10:20, 10:30] = (250, 250, 250)                   # a white card over it
+        self.assertEqual(P.visible_pixels(alone, film, base)[1], 0)
+
+    def test_pixels_where_the_graphic_does_not_change_the_picture_are_not_counted(self):
+        alone, film, base = self.scene()
+        alone[30:35, 30:35] = (90, 90, 90, 255)                # same as the picture under it
+        self.assertEqual(P.visible_pixels(alone, film, base)[0], 200)
+
+    def test_a_check_frame_under_the_share_fails_naming_the_graphic_the_check_the_frame_and_its_cue(self):
+        rows, failures = P.visible_rows('p-counter', [{'frame': 271, 'what': "2/3 'present'", 'px': 4000, 'shown': 120}])
+        (f,) = failures
+        self.assertTrue(f.startswith('p-counter: visible on the film:'), f)
+        self.assertIn('frame 271', f)
+        self.assertIn("2/3 'present'", f)
+        self.assertIn('3%', f)
+        self.assertFalse(rows[0]['pass'])
+
+    def test_a_check_frame_where_the_graphic_changes_no_pixels_fails_as_unchecked(self):
+        _, failures = P.visible_rows('g-circle', [{'frame': 300, 'what': "'front'", 'px': 3, 'shown': 3}])
+        self.assertIn('g-circle: visible on the film:', failures[0])
+
+    def test_check_frames_are_the_cue_frames_of_the_graphic_and_of_each_counter_update(self):
+        rows = [{'id': 'g-circle', 'cueOnsetFrame': 300, 'cue': {'words': 'front of you.'}},
+                {'id': 'p-counter', 'cueOnsetFrame': 229, 'cue': {'words': 'out of reach.'}},
+                {'id': 'p-counter', 'update': '1/3', 'cueOnsetFrame': 229, 'cue': {'words': 'out of reach.'}},
+                {'id': 'p-counter', 'update': '2/3', 'cueOnsetFrame': 271, 'cue': {'words': 'present'}}]
+        self.assertEqual(P.cue_frames(rows, 'p-counter'), [(229, "'out of reach.'"), (271, "2/3 'present'")])
+        self.assertEqual(P.cue_frames(rows, 'g-circle'), [(300, "'front of you.'")])
+
+
+class CaptionSafeZone(unittest.TestCase):
+    """captions keep the existing safe zone (build_reel PLATFORMS['reels']), measured on the captions' rendered ink"""
+    CAPS = [('Is', 3), ('your', 6), ('plate', 9)]
+
+    def test_caption_ink_inside_the_reels_zone_passes(self):
+        info, failures = P.caption_safe_zone({3: [[300, 1068, 780, 1198]], 6: [[300, 1068, 780, 1198]]}, self.CAPS)
+        self.assertEqual(failures, [])
+        self.assertEqual(info['framesWithInk'], 2)
+
+    def test_caption_ink_under_the_bottom_margin_fails_naming_the_word_the_frame_and_the_margin(self):
+        _, failures = P.caption_safe_zone({3: [[300, 1068, 780, 1198]], 7: [[300, 1500, 780, 1630]],
+                                           10: [[300, 1500, 780, 1630]]}, self.CAPS)
+        (f,) = failures
+        self.assertTrue(f.startswith('captions: safe zone:'), f)
+        self.assertIn("'your'", f)
+        self.assertIn('frame 7', f)
+        self.assertIn('bottom', f)
+        self.assertIn('2 caption words', f)
+
+
+class WordsOnFilm(unittest.TestCase):
+    """every script word, in order, heard on the rendered film's audio; the captions are not read"""
+    def test_every_word_heard_passes(self):
+        pk = packet()
+        info, failures = P.words_on_film(pk, words(L2, 0) + words(L3, 4) + words(L4, 8))
+        self.assertEqual(failures, [])
+        self.assertEqual((info['heard'], info['scriptWords']), (35, 35))
+
+    def test_a_word_the_film_does_not_say_fails_naming_its_line_index_and_text(self):
+        heard = [w for w in words(L2, 0) + words(L3, 4) + words(L4, 8) if w['text'] != 'another']
+        info, failures = P.words_on_film(packet(), heard)
+        (f,) = failures
+        self.assertTrue(f.startswith('words: 34/35 script words heard on the film'), f)
+        self.assertIn("l3 word 5 'another'", f)
+
+    def test_words_said_out_of_order_are_not_all_heard(self):
+        said = words(L2, 0) + words(L3, 4) + words(L4, 8)
+        said[1], said[2] = {**said[2], 'start': said[1]['start']}, {**said[1], 'start': said[2]['start']}   # "the is"
+        info, failures = P.words_on_film(packet(), said)
+        self.assertEqual(info['heard'], 34)
+        self.assertTrue(failures)
 
 
 class Entry(unittest.TestCase):
