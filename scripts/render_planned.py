@@ -6,11 +6,13 @@ Usage:  PY render_packet.py <planned packet.json> --shots DIR --out DIR      (re
         packet has `graphics`). DIR holds every take and picture the packet names; each is found by its sha256.
 Steps: refuse a packet pinned to another build, a graphic or persistent element the kit has no piece for (or on another
 layout), a malformed one (naming its id), or a cue whose words are not the words of its line (every cue carries its words;
-a repeated word needs its index) -> transcribe the takes as cut (medium.en) -> resolve every cue on that render transcript
-(refuse a cue word missing from it, or a hold past its line's take); a graphic enters on the first frame at or after its
-cue word's onset and not before the kit's caption shows that word -> compose index.html from the kit (takes at the kit's
-placements in wrappers the top band slides, captions unchanged, one piece per graphic, the step counter as one element
-with timed updates) -> render (HyperFrames + GSAP at the pin, local GSAP, no CDN) -> render each graphic alone as RGBA
+a repeated word needs its index), a take with no measured cut (take meta.cut, take_cuts.py) or a cut past its take's last
+frame -> lay the takes end to end, each playing its cut -> build the captions from each take's words placed through its
+cut and the line's caption groups -> transcribe the takes as cut (medium.en) -> resolve every cue on that render
+transcript (refuse a cue word missing from it, or a hold past its line's take); a graphic enters on the first frame at or
+after its cue word's onset and not before its caption shows that word -> compose index.html from the kit (takes in
+wrappers the top band slides, the built captions, one piece per graphic, the step counter as one element with timed
+updates) -> render (HyperFrames + GSAP at the pin, local GSAP, no CDN) -> render each graphic alone as RGBA
 frames and measure the frames it is on screen (and, for the counter, the frame each update changes it) -> timing table
 vs the rules -> gates by class (contract D, GATES): render the base (the film without graphics or captions, presenter
 moves kept) and find the face on it; media, graphic text and annotations keep clear of that face and are visible on the
@@ -38,7 +40,7 @@ import skillenv  # noqa: E402
 from edl_from_words import align, norm  # noqa: E402
 
 SK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PIN = {'hyperframes': '0.9.23', 'gsap': '3.15.0', 'kit': 'film3-r3.3', 'fps': 24}
+PIN = {'hyperframes': '0.9.23', 'gsap': '3.15.0', 'kit': 'planned-r4', 'fps': 24}
 # gsap@3.15.0 dist/gsap.min.js, as hyperframes 0.9.23 ships it
 GSAP_SHA = '92bb9a96476f983d212a2bc4f54c889039c1696dd4461d40a736860938570fbb'
 # settled rules (SPEC module 2): main picture 2.0 s, overlays 1.5 s (a counter state is an overlay, as r3's verifier
@@ -79,18 +81,16 @@ def load_kit(name=PIN['kit']):
         return json.load(fh)
 
 
-def caption_words(kit):
-    """[(word, the second it appears)] of the kit's captions (r3's captions.html, one span per script word in order)"""
-    page = kit_file(kit, 'captions.html')
+def caption_words(page):
+    """[(word, the second it appears)] of a captions page (one span per script word in order)"""
     words = re.findall(r'<span class="cw[^"]*" id="cw(\d+)">([^<]*)</span>', page)
     at = {int(k): float(t) for k, t in re.findall(r'tl\.fromTo\("#cw(\d+)",.*?\}, ([\d.]+)\);', page)}
-    return [(w, at[int(k)]) for k, w in words]
+    return [(html.unescape(w), at[int(k)]) for k, w in words]
 
 
-def caption_frames(kit, fps=None):
+def caption_frames(page, fps):
     """[(word, the first frame its caption shows)]"""
-    fps = fps or kit['fps']
-    return [(w, first_frame(t, fps)) for w, t in caption_words(kit)]
+    return [(w, first_frame(t, fps)) for w, t in caption_words(page)]
 
 
 def caption_at(caps, frame):
@@ -102,6 +102,151 @@ def caption_at(caps, frame):
 def first_frame(t, fps):
     """the first frame at or after a moment"""
     return math.ceil(t * fps - 1e-6)
+
+
+# ------------------------------------------------------------------ takes and captions (ticket 11)
+def layout(pk, fps):
+    """({line id: its take's place in the film}, the film's frames): the takes end to end, each playing its measured cut
+    (take meta.cut: fromFrame, toFrame at fps, from take_cuts.py; the plan checks timed the plan on the same cut)"""
+    place, at = {}, 0
+    for ln in pk['lines']:
+        c = ((ln.get('take') or {}).get('meta') or {}).get('cut')
+        if not isinstance(c, dict) or not all(isinstance(c.get(k), int) and not isinstance(c.get(k), bool) for k in ('fromFrame', 'toFrame')):
+            raise Refused(f"line {ln.get('id')}: its take {(ln.get('take') or {}).get('id')} has no measured cut (take meta.cut from "
+                          'take_cuts.py)')
+        if c.get('fps') != fps:
+            raise Refused(f"line {ln['id']}: its cut is at {c.get('fps')} fps, the film at {fps}")
+        a, b = c['fromFrame'], c['toFrame']
+        if not 0 <= a < b:
+            raise Refused(f"line {ln['id']}: its cut {a}-{b} is empty")
+        place[ln['id']] = {'start': at / fps, 'mediaStart': a / fps, 'duration': (b - a) / fps, 'startFrame': at, 'fromFrame': a,
+                           'toFrame': b, 'frames': b - a, 'speech': c.get('speech')}
+        at += b - a
+    return place, at
+
+
+def check_cuts(pk, frames):
+    """refuses a cut past its take's last frame. frames: {take sha256: its frame count}"""
+    for ln in pk['lines']:
+        n, b = frames[ln['take']['sha256']], ln['take']['meta']['cut']['toFrame']
+        if b > n:
+            raise Refused(f"line {ln['id']}: its cut ends on frame {b}, past its take's {n} frames")
+
+
+PUNCT = tuple(',.?!;:')
+
+
+def default_groups(text):
+    """caption groups for a line without its own: a break after punctuation or every three words, no accent"""
+    groups, cur = [], []
+    for t in text.split():
+        cur.append(t)
+        if t.endswith(PUNCT) or len(cur) == 3:
+            groups.append(' '.join(cur))
+            cur = []
+    return ' | '.join(groups + ([' '.join(cur)] if cur else []))
+
+
+def caption_groups(pk, place, fps):
+    """[[(word, accent, start, end)]] in film seconds: each line's caption groups ("|" splits, "*" marks the accent;
+    default_groups without them), its words timed by its take's words placed through its cut (r3's gencap.py: the first
+    word at the take's measured speech start); words the take's words do not have are spread evenly from the end of the
+    word heard before them (or the speech start) to the start of the word heard after them (or the cut's end less 0.12 s).
+    Refuses a line whose groups are not its words or whose take has no words"""
+    out = []
+    for ln in pk['lines']:
+        spec = ln.get('captions') or default_groups(ln['text'])
+        if not isinstance(spec, str):
+            raise Refused(f"line {ln['id']}: its caption groups are not a string")
+        groups = [g.split() for g in spec.split('|')]
+        flat = [t.rstrip('*') for g in groups for t in g]
+        if [norm(t) for t in flat] != [norm(t) for t in ln['text'].split()] or not all(groups):
+            raise Refused(f"line {ln['id']}: its caption groups '{spec}' are not its words")
+        p, words = place[ln['id']], ln['take'].get('words') or []
+        if not words:
+            raise Refused(f"line {ln['id']}: its take {ln['take'].get('id')} has no words (take_cuts.py measures them)")
+        heard = align(flat, [{'text': w['word'], 'start': w['start'], 'end': w['end']} for w in words])
+        speech = (p.get('speech') or [None])[0]
+        m0, ms = p['startFrame'] / fps, p['fromFrame'] / fps
+        local, prev, gap = [], speech if speech is not None else ms, []
+        for k, i in enumerate(heard + [-1]):           # -1: the cut's end closes a gap at the line's tail
+            if i is None:
+                gap.append(k)
+                continue
+            if i == -1:
+                nxt = p['toFrame'] / fps - 0.12
+            else:
+                nxt = words[i]['start']
+                if k == 0 and speech is not None:
+                    nxt = max(speech, nxt)
+            for j, _ in enumerate(gap):
+                at = prev + (max(nxt, prev) - prev) * j / len(gap)
+                local.append((at, at))
+            gap = []
+            if i != -1:
+                local.append((nxt, words[i]['end']))
+                prev = words[i]['end']
+        times = [(round(m0 + st - ms, 3), round(m0 + en - ms, 3)) for st, en in local]
+        k = 0
+        for g in groups:
+            out.append([(t.rstrip('*'), t.endswith('*'), *times[k + j]) for j, t in enumerate(g)])
+            k += len(g)
+    return out
+
+
+CAPTION_MAX_W = 810     # px of glyphs: centred, the ink ends by x 945, the Reels action column's edge from y 1155 (which the
+                        # caption band reaches); rendered ink matched this width to the pixel on face23be l3 (983 predicted, 983
+                        # measured), and r3's widest group ("another room," 806 px, ink to 943) passed the gate
+
+
+def caption_width(words, size):
+    """a caption group's width in px at a font size, from Poppins 800's own glyph advances: each word with the page's
+    -0.01 em letter spacing, a space and 0.4 em of word margins between words"""
+    from PIL import ImageFont
+    ft = ImageFont.truetype(os.path.join(SK, 'kits', PIN['kit'], 'fonts', 'Poppins-800-latin.woff2'), size)
+    return sum(ft.getlength(w) - 0.01 * size * (len(w) - 1) for w in words) + (ft.getlength(' ') + 0.4 * size) * (len(words) - 1)
+
+
+def caption_size(words):
+    """r3's size (104 px, or 820 px over 0.6 em a character), made smaller until the group fits CAPTION_MAX_W"""
+    size = min(104, int(820 / (len(' '.join(words)) * 0.6)))
+    while size > 1 and caption_width(words, size) > CAPTION_MAX_W:
+        size -= 1
+    return size
+
+
+def captions_page(groups, end):
+    """the kit's captions page for these groups (r3's gencap.py timing): a group shows 0.02 s before its first word (not
+    before 0.12 s), each word pops in at its start, and the group leaves 0.3 s after its last word (at least 0.2 s after
+    its start) or as the next group shows; the last stays to the end; each group at caption_size"""
+    body, js, wid = [], [], 0
+    for gi, grp in enumerate(groups):
+        txt = ' '.join(t for t, _, _, _ in grp)
+        spans = []
+        for t, acc, _, _ in grp:
+            spans.append(f'<span class="cw{" acc" if acc else ""}" id="cw{wid}">{html.escape(t, quote=False)}</span>')
+            wid += 1
+        body.append(f'    <div class="cg" id="cg{gi}" style="font-size:{caption_size(txt.split())}px">' + ' '.join(spans) + '</div>')
+    wid = 0
+    for gi, grp in enumerate(groups):
+        start = max(0.12, grp[0][2] - 0.02)
+        if gi + 1 < len(groups):
+            stop = min(groups[gi + 1][0][2] - 0.02, max(grp[-1][3], grp[-1][2] + 0.2) + 0.3)
+        js.append(f'    tl.set("#cg{gi}", {{ opacity: 1, visibility: "visible" }}, {start:.3f});')
+        for _, acc, s, _ in grp:
+            at = max(s, start)
+            if acc:
+                js.append(f'    tl.fromTo("#cw{wid}", {{ opacity: 0, scale: 0.6, filter: "blur(8px)" }}, {{ opacity: 1, scale: 1.06, '
+                          f'filter: "blur(0px)", duration: 0.18, ease: "back.out(2)" }}, {at:.3f});')
+            else:
+                js.append(f'    tl.fromTo("#cw{wid}", {{ opacity: 0, scale: 0.86, filter: "blur(6px)" }}, {{ opacity: 1, scale: 1, '
+                          f'filter: "blur(0px)", duration: 0.13, ease: "expo.out" }}, {at:.3f});')
+            wid += 1
+        if gi + 1 < len(groups):
+            js.append(f'    tl.to("#cg{gi}", {{ opacity: 0, duration: 0.08, ease: "power2.in" }}, {stop - 0.08:.3f});')
+            js.append(f'    tl.set("#cg{gi}", {{ opacity: 0, visibility: "hidden" }}, {stop:.3f});')
+    return fill(kit_file(load_kit(), 'captions.html'), {'__GROUPS__': '\n'.join(body), '__TIMELINE__': '\n'.join(js),
+                                                         '__END__': f'{end:.6f}'})
 
 
 # ------------------------------------------------------------------ cues (contract B)
@@ -275,7 +420,7 @@ def text_words(gr):
 
 def resolve(pk, transcript, place, fps, captions=None):
     """every graphic and persistent element placed on the render transcript: the first cue word's onset, the frame it
-    enters on (the first frame at or after the onset and, with the kit's captions, not before the frame its caption shows
+    enters on (the first frame at or after the onset and, with the captions, not before the frame its caption shows
     that word) and its frames (its hold, or to its line's cut); refuses a cue word the transcript does not have, a hold
     past its line's take, a b-roll trim shorter than its hold, or captions that are not the packet's words"""
     tokens, first = [], {}
@@ -283,7 +428,7 @@ def resolve(pk, transcript, place, fps, captions=None):
         first[ln['id']] = len(tokens)
         tokens += ln['text'].split()
     if captions is not None and [norm(w) for w, _ in captions] != [norm(t) for t in tokens]:
-        raise Refused(f'the kit\'s captions are not the words of this packet ({len(captions)} caption words, {len(tokens)} script words)')
+        raise Refused(f'the captions are not the words of this packet ({len(captions)} caption words, {len(tokens)} script words)')
     heard = align(tokens, transcript)
     lines = {ln['id']: ln for ln in pk['lines']}
 
@@ -645,11 +790,11 @@ def film_transcript(film, work):
     return heard_words(wav)
 
 
-def transcribe(pk, files, kit, work):
-    """the render transcript: the takes as cut (the kit's placements) in one track, medium.en words in film time"""
+def transcribe(pk, files, place, work):
+    """the render transcript: the takes as cut (their places in the film) in one track, medium.en words in film time"""
     ins, chains = [], []
     for i, ln in enumerate(pk['lines']):
-        t = kit['takes'][ln['id']]
+        t = place[ln['id']]
         ins += ['-i', files[ln['take']['sha256']]]
         chains.append(f"[{i}:a]atrim=start={t['mediaStart']}:duration={t['duration']},asetpts=PTS-STARTPTS[a{i}]")
     wav = os.path.join(work, 'cut.wav')
@@ -911,23 +1056,25 @@ def presenter_tweens(kit, r, take, fps):
     return out
 
 
-def build(pk, files, resolved, kit, proj, masks):
+def build(pk, files, resolved, kit, proj, masks, place, captions):
     """<proj>/index.html (the film) and <masks>/<id>/index.html (each graphic alone, transparent: a project of its own, so
-    each project has one root composition) from the kit"""
-    fps, dur = kit['fps'], kit['duration']
+    each project has one root composition) from the kit, the takes at their places and the built captions page"""
+    fps = kit['fps']
+    dur = round(sum(p['frames'] for p in place.values()) / fps, 6)
     kdir = os.path.join(SK, 'kits', kit['kit'])
     for sub in ('assets/takes', 'assets/gen', 'assets/fonts', 'compositions'):
         os.makedirs(os.path.join(proj, sub), exist_ok=True)
     for font in FONTS:
         shutil.copyfile(os.path.join(kdir, 'fonts', font), os.path.join(proj, 'assets', 'fonts', font))
-    shutil.copyfile(os.path.join(kdir, 'captions.html'), os.path.join(proj, 'compositions', 'captions.html'))
+    with open(os.path.join(proj, 'compositions', 'captions.html'), 'w', encoding='utf-8') as fh:
+        fh.write(captions)
     takes, lines = '', {ln['id']: ln for ln in pk['lines']}
     for ln in pk['lines']:
-        t, rel = kit['takes'][ln['id']], f"assets/takes/{ln['id']}.mp4"
+        t, rel = place[ln['id']], f"assets/takes/{ln['id']}.mp4"
         shutil.copyfile(files[ln['take']['sha256']], os.path.join(proj, rel))
         takes += (f'      <div class="stage" id="w-{ln["id"]}">\n'
-                  f'        <video id="take-{ln["id"]}" class="clip take" src="{rel}" data-start="{t["start"]}" '
-                  f'data-duration="{t["duration"]}" data-media-start="{t["mediaStart"]}" data-track-index="0" '
+                  f'        <video id="take-{ln["id"]}" class="clip take" src="{rel}" data-start="{num(t["start"])}" '
+                  f'data-duration="{num(t["duration"])}" data-media-start="{num(t["mediaStart"])}" data-track-index="0" '
                   f'data-has-audio="true" data-volume="1" playsinline></video>\n      </div>\n')
     by_id = {g['id']: g for g in list(pk['graphics']) + list(pk.get('persistent') or [])}
     hosts, needs, main = {}, {}, ''
@@ -1033,11 +1180,9 @@ def base_faces(base, detect=None):
     return out
 
 
-def line_frames(kit):
+def line_frames(place):
     """{film frame: the line whose take is on screen}"""
-    fps = kit['fps']
-    return {f: lid for lid, t in kit['takes'].items()
-            for f in range(round(t['start'] * fps), round((t['start'] + t['duration']) * fps))}
+    return {f: lid for lid, t in place.items() for f in range(t['startFrame'], t['startFrame'] + t['frames'])}
 
 
 def visible_checks(rows, resolved, film, base, work):
@@ -1158,11 +1303,13 @@ def load(packet_path, shots_dir):
         kit = load_kit()
         check_pin(pk)
         check_packet(pk, kit)
-        missing = [ln['id'] for ln in pk['lines'] if ln['id'] not in kit['takes']]
-        if missing:
-            raise Refused(f"lines {', '.join(missing)} have no placement in kit {kit['kit']}")
-        return pk, kit, match_files(pk, shots_dir)
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        place, nframes = layout(pk, kit['fps'])
+        caption_groups(pk, place, kit['fps'])
+        files = match_files(pk, shots_dir)
+        import take_cuts
+        check_cuts(pk, {ln['take']['sha256']: take_cuts.frame_count(files[ln['take']['sha256']])[0] for ln in pk['lines']})
+        return pk, kit, files
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, subprocess.CalledProcessError) as e:
         raise Refused(f'cannot read the packet ({type(e).__name__}: {e})')
 
 
@@ -1199,18 +1346,24 @@ def main(packet_path, shots_dir, out):
     for d in (proj, work, ev, os.path.join(out, 'renders')):
         os.makedirs(d, exist_ok=True)
     times = {}
+    place, nframes = layout(pk, fps)
+    try:
+        page = captions_page(caption_groups(pk, place, fps), nframes / fps)
+    except Refused as e:
+        print(f'packet refused: {e}', file=sys.stderr)
+        return 2
     print('== transcribe: medium.en on the takes as cut', flush=True)
-    transcript = transcribe(pk, files, kit, work)
+    transcript = transcribe(pk, files, place, work)
     times['transcribeSec'] = round(time.time() - t0, 1)
     try:
-        caps = caption_frames(kit)
-        resolved = resolve(pk, transcript, kit['takes'], fps, caps)
+        caps = caption_frames(page, fps)
+        resolved = resolve(pk, transcript, place, fps, caps)
     except Refused as e:
         print(f'packet refused: {e}', file=sys.stderr)
         return 2
     hf, env, pkg = hyperframes()
     vendor_gsap(pkg, os.path.join(proj, 'assets', 'vendor', 'gsap.min.js'))
-    build(pk, files, resolved, kit, proj, masks)
+    build(pk, files, resolved, kit, proj, masks, place, page)
     print('== lint', flush=True)
     run(hf + ['lint'], log=os.path.join(work, 'lint.log'), cwd=proj, env=env)
     slug = 'ep-' + (''.join(c for c in str(pk.get('episodeId', '')).lower() if c.isalnum())[:8] or 'unknown')
@@ -1245,7 +1398,7 @@ def main(packet_path, shots_dir, out):
     heard_film = film_transcript(film, work)
     times['filmTranscribeSec'] = round(time.time() - t1, 1)
     t1 = time.time()
-    gates, gate_failures, at = {'faceClearance': {}, 'visibleOnFilm': {}}, [], line_frames(kit)
+    gates, gate_failures, at = {'faceClearance': {}, 'visibleOnFilm': {}}, [], line_frames(place)
     for r in resolved:
         if 'face clearance' in GATES[r['treatment']]['checks']:
             gates['faceClearance'][r['id']], bad = face_clearance(r, measured[r['id']], faces, at)
@@ -1274,16 +1427,18 @@ def main(packet_path, shots_dir, out):
     tokens, heard = word_sheet(pk, heard_film, {r['id']: set(measured[r['id']]['shown']) for r in resolved}, film, fps, work, ev)
     cue_sheet(rows, film, int(st['nb_read_frames']), fps, work, ev)
     dump(os.path.join(ev, 'resolved-timeline.json'), {
-        'pin': PIN, 'packetEngine': pk['versions']['engine'], 'kit': kit['kit'], 'fps': fps, 'duration': kit['duration'],
-        'takes': [{'lineId': ln['id'], 'takeId': ln['take']['id'], 'sha256': ln['take']['sha256'], **kit['takes'][ln['id']]}
-                  for ln in pk['lines']],
+        'pin': PIN, 'packetEngine': pk['versions']['engine'], 'kit': kit['kit'], 'fps': fps, 'duration': nframes / fps,
+        'takes': [{'lineId': ln['id'], 'takeId': ln['take']['id'], 'sha256': ln['take']['sha256'], 'cut': ln['take']['meta']['cut'],
+                   **{k: place[ln['id']][k] for k in ('start', 'mediaStart', 'duration', 'startFrame', 'frames')}} for ln in pk['lines']],
         'transcript': {'model': 'faster-whisper medium.en int8', 'of': 'the takes as cut (cues resolve on it)',
                        'words': transcript, 'scriptWords': len(tokens),
                        'scriptWordsHeard': sum(h is not None for h in align(tokens, transcript))},
         'filmTranscript': {'model': 'faster-whisper medium.en int8', 'of': "the rendered film's audio (the words check)",
                            'words': heard_film, 'scriptWords': len(tokens), 'scriptWordsHeard': sum(h is not None for h in heard)},
         'graphics': [{**r, 'startSec': r['startFrame'] / fps, 'durationSec': r['frames'] / fps} for r in resolved],
-        'captions': {'piece': 'captions.html', 'sha256': sha256(os.path.join(proj, 'compositions', 'captions.html'))},
+        'captions': {'piece': 'captions.html', 'built': 'from the take words and caption groups',
+                     'groups': [ln.get('captions') or default_groups(ln['text']) for ln in pk['lines']],
+                     'sha256': sha256(os.path.join(proj, 'compositions', 'captions.html'))},
         'gsapSha256': GSAP_SHA, 'film': {'path': os.path.relpath(film, out), 'sha256': sha256(film), 'probe': info}})
     dump(os.path.join(ev, 'timing-table.json'), {
         'fps': fps, 'rules': {'minHoldSec': MIN_HOLD, 'text': f'>= {TEXT_BASE} s + {TEXT_PER_WORD} s a word',

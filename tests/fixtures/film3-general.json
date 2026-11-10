@@ -1,0 +1,1239 @@
+{
+ "note": "film 3 through the general path (ticket 11): each line with its take words (gates/take{n}.json, small.en), its r3 caption groups (verify/gencap.py: | splits groups, * marks the accent) and r3's cut (verify/cut-plan.json frames; speechStart = plan2.py env_on); run-6's render transcript, plan and resolved frames (ticket08-20261110/run-6)",
+ "sources": {
+  "cutPlan": "9d766db10ae338b43e60ad0d65d97faefc6e66e57196c932892d3c4eaa7a8cf4",
+  "gencap": "f4fe9eb857e7fa5aece6b0c371e32b5538a5e027cf2cfcf3c41e3920875f016d",
+  "run6Packet": "c9f6acd7e1b94d12a100ec722c21373158acd555fdee1b0e25c85df0f467558a",
+  "run6Timeline": "597d24ec084f1c06b2c3b028a14ff08aa862e147830b8d0fe296cf82006e0259"
+ },
+ "lines": [
+  {
+   "id": "l1",
+   "text": "Is your plate full? Circle one thing, then try these three hacks.",
+   "captions": "Is your plate | full?* | Circle | one* thing, | then try | these three* hacks.*",
+   "take": {
+    "id": "take1",
+    "sha256": "df7ba14ffc4596c0a7c7b76b8235e3c6ae480bd994a6676cc0beddf85ee25109",
+    "width": 1080,
+    "height": 1920,
+    "words": [
+     {
+      "word": "Is",
+      "start": 0,
+      "end": 0.34
+     },
+     {
+      "word": "your",
+      "start": 0.34,
+      "end": 0.5
+     },
+     {
+      "word": "plate",
+      "start": 0.5,
+      "end": 0.7
+     },
+     {
+      "word": "full?",
+      "start": 0.7,
+      "end": 1.02
+     },
+     {
+      "word": "Circle",
+      "start": 1.62,
+      "end": 1.72
+     },
+     {
+      "word": "one",
+      "start": 1.72,
+      "end": 2
+     },
+     {
+      "word": "thing,",
+      "start": 2,
+      "end": 2.38
+     },
+     {
+      "word": "then",
+      "start": 2.76,
+      "end": 2.8
+     },
+     {
+      "word": "try",
+      "start": 2.8,
+      "end": 3.04
+     },
+     {
+      "word": "these",
+      "start": 3.04,
+      "end": 3.3
+     },
+     {
+      "word": "three",
+      "start": 3.3,
+      "end": 3.54
+     },
+     {
+      "word": "hacks.",
+      "start": 3.54,
+      "end": 3.8
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 3,
+    "toFrame": 95,
+    "speechStart": 0.25
+   }
+  },
+  {
+   "id": "l2",
+   "text": "What is the first thing to move off the table?",
+   "captions": "What is the | first* thing | to move off | the table?*",
+   "take": {
+    "id": "take2",
+    "sha256": "bf88c4d6ea5ff37d5fd8b64cbfb0cf9b47f3bf6b538568791b965423e9381eda",
+    "width": 1080,
+    "height": 1920,
+    "words": [
+     {
+      "word": "What",
+      "start": 0.7999999999999996,
+      "end": 1.28
+     },
+     {
+      "word": "is",
+      "start": 1.28,
+      "end": 1.42
+     },
+     {
+      "word": "the",
+      "start": 1.42,
+      "end": 1.6
+     },
+     {
+      "word": "first",
+      "start": 1.6,
+      "end": 1.88
+     },
+     {
+      "word": "thing",
+      "start": 1.88,
+      "end": 2.32
+     },
+     {
+      "word": "to",
+      "start": 2.32,
+      "end": 2.88
+     },
+     {
+      "word": "move",
+      "start": 2.88,
+      "end": 3.06
+     },
+     {
+      "word": "off",
+      "start": 3.06,
+      "end": 3.26
+     },
+     {
+      "word": "the",
+      "start": 3.26,
+      "end": 3.42
+     },
+     {
+      "word": "table?",
+      "start": 3.42,
+      "end": 3.66
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 24,
+    "toFrame": 96,
+    "speechStart": 1.1
+   }
+  },
+  {
+   "id": "l3",
+   "text": "Your phone. Put it in another room, out of reach.",
+   "captions": "Your phone.* | Put it in | another* room,* | out of reach.*",
+   "take": {
+    "id": "take3",
+    "sha256": "674dd2b27490630c613bf5a52890ea1cd81b39ed36177be775eb00105a10eff3",
+    "width": 720,
+    "height": 1280,
+    "words": [
+     {
+      "word": "Your",
+      "start": 0,
+      "end": 0.4
+     },
+     {
+      "word": "phone.",
+      "start": 0.4,
+      "end": 0.72
+     },
+     {
+      "word": "Put",
+      "start": 1.54,
+      "end": 1.66
+     },
+     {
+      "word": "it",
+      "start": 1.66,
+      "end": 1.78
+     },
+     {
+      "word": "in",
+      "start": 1.78,
+      "end": 1.9
+     },
+     {
+      "word": "another",
+      "start": 1.9,
+      "end": 2.16
+     },
+     {
+      "word": "room",
+      "start": 2.16,
+      "end": 2.54
+     },
+     {
+      "word": "out",
+      "start": 2.54,
+      "end": 3.04
+     },
+     {
+      "word": "of",
+      "start": 3.04,
+      "end": 3.22
+     },
+     {
+      "word": "reach.",
+      "start": 3.22,
+      "end": 3.44
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 4,
+    "toFrame": 90,
+    "speechStart": 0.27
+   }
+  },
+  {
+   "id": "l4",
+   "text": "Then stay fully present with the one thing in front of you. Just that page.",
+   "captions": "Then stay | fully present* | with the | one* thing | in front | of you. | Just that page.*",
+   "take": {
+    "id": "take4",
+    "sha256": "def1a439df7de905e51867c1e6855318e6a493399257e3dae6e3a61be69146ac",
+    "width": 720,
+    "height": 1280,
+    "words": [
+     {
+      "word": "Then",
+      "start": 0,
+      "end": 0.32
+     },
+     {
+      "word": "stay",
+      "start": 0.32,
+      "end": 0.6
+     },
+     {
+      "word": "fully",
+      "start": 0.6,
+      "end": 0.92
+     },
+     {
+      "word": "present",
+      "start": 0.92,
+      "end": 1.28
+     },
+     {
+      "word": "with",
+      "start": 1.28,
+      "end": 1.5
+     },
+     {
+      "word": "the",
+      "start": 1.5,
+      "end": 1.62
+     },
+     {
+      "word": "one",
+      "start": 1.62,
+      "end": 1.8
+     },
+     {
+      "word": "thing",
+      "start": 1.8,
+      "end": 2
+     },
+     {
+      "word": "in",
+      "start": 2,
+      "end": 2.16
+     },
+     {
+      "word": "front",
+      "start": 2.16,
+      "end": 2.28
+     },
+     {
+      "word": "of",
+      "start": 2.28,
+      "end": 2.44
+     },
+     {
+      "word": "you,",
+      "start": 2.44,
+      "end": 2.66
+     },
+     {
+      "word": "just",
+      "start": 3.12,
+      "end": 3.24
+     },
+     {
+      "word": "that",
+      "start": 3.24,
+      "end": 3.48
+     },
+     {
+      "word": "page.",
+      "start": 3.48,
+      "end": 3.74
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 2,
+    "toFrame": 97,
+    "speechStart": 0.22
+   }
+  },
+  {
+   "id": "l5",
+   "text": "Now give that page a clear start. What small ritual could mark it?",
+   "captions": "Now give | that page* | a clear start.* | What small | ritual* | could mark it?",
+   "take": {
+    "id": "take5",
+    "sha256": "7767ebbcb2916f265ba409be768e0bfd3016fb192b934675f2b008eb165693bf",
+    "width": 720,
+    "height": 1280,
+    "words": [
+     {
+      "word": "Now",
+      "start": 0,
+      "end": 0.3
+     },
+     {
+      "word": "give",
+      "start": 0.3,
+      "end": 0.5
+     },
+     {
+      "word": "that",
+      "start": 0.5,
+      "end": 0.72
+     },
+     {
+      "word": "page",
+      "start": 0.72,
+      "end": 0.98
+     },
+     {
+      "word": "a",
+      "start": 0.98,
+      "end": 1.22
+     },
+     {
+      "word": "clear",
+      "start": 1.22,
+      "end": 1.42
+     },
+     {
+      "word": "start.",
+      "start": 1.42,
+      "end": 1.82
+     },
+     {
+      "word": "What",
+      "start": 2.26,
+      "end": 2.42
+     },
+     {
+      "word": "small",
+      "start": 2.42,
+      "end": 2.8
+     },
+     {
+      "word": "ritual",
+      "start": 2.8,
+      "end": 3.16
+     },
+     {
+      "word": "could",
+      "start": 3.16,
+      "end": 3.42
+     },
+     {
+      "word": "mark",
+      "start": 3.42,
+      "end": 3.66
+     },
+     {
+      "word": "it?",
+      "start": 3.66,
+      "end": 3.9
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 1,
+    "toFrame": 97,
+    "speechStart": 0.18
+   }
+  },
+  {
+   "id": "l6",
+   "text": "Pick one tiny ritual, like pouring tea, and do it every time you start.",
+   "captions": "Pick one* | tiny ritual,* | like pouring tea,* | and do it | every time | you start.*",
+   "take": {
+    "id": "take6",
+    "sha256": "2efdc2ef43041aa0f6e46c6ee35d8cb22a9b0fa4a5f984c12170f6f63eaf724b",
+    "width": 720,
+    "height": 1280,
+    "words": [
+     {
+      "word": "Pick",
+      "start": 0,
+      "end": 0.18
+     },
+     {
+      "word": "one",
+      "start": 0.18,
+      "end": 0.5
+     },
+     {
+      "word": "tiny",
+      "start": 0.5,
+      "end": 0.72
+     },
+     {
+      "word": "ritual,",
+      "start": 0.72,
+      "end": 1.18
+     },
+     {
+      "word": "like",
+      "start": 1.56,
+      "end": 1.6
+     },
+     {
+      "word": "pouring",
+      "start": 1.6,
+      "end": 1.9
+     },
+     {
+      "word": "tea,",
+      "start": 1.9,
+      "end": 2.24
+     },
+     {
+      "word": "and",
+      "start": 2.5,
+      "end": 2.68
+     },
+     {
+      "word": "do",
+      "start": 2.68,
+      "end": 2.82
+     },
+     {
+      "word": "it",
+      "start": 2.82,
+      "end": 2.96
+     },
+     {
+      "word": "every",
+      "start": 2.96,
+      "end": 3.22
+     },
+     {
+      "word": "time",
+      "start": 3.22,
+      "end": 3.42
+     },
+     {
+      "word": "you",
+      "start": 3.42,
+      "end": 3.58
+     },
+     {
+      "word": "start.",
+      "start": 3.58,
+      "end": 3.86
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 0,
+    "toFrame": 97,
+    "speechStart": 0.06
+   }
+  },
+  {
+   "id": "l7",
+   "text": "Phone away, one thing, same ritual. Now pour your tea and begin.",
+   "captions": "Phone away,* | one thing,* | same ritual.* | Now pour | your tea* | and begin.*",
+   "take": {
+    "id": "take7",
+    "sha256": "cbf3f5800aca8ee2abadbf82cd617a69c163db172a5db6d9891477a653b2de64",
+    "width": 720,
+    "height": 1280,
+    "words": [
+     {
+      "word": "Phone",
+      "start": 0,
+      "end": 0.14
+     },
+     {
+      "word": "away,",
+      "start": 0.14,
+      "end": 0.46
+     },
+     {
+      "word": "one",
+      "start": 0.8,
+      "end": 0.92
+     },
+     {
+      "word": "thing,",
+      "start": 0.92,
+      "end": 1.2
+     },
+     {
+      "word": "same",
+      "start": 1.56,
+      "end": 1.66
+     },
+     {
+      "word": "ritual.",
+      "start": 1.66,
+      "end": 2.06
+     },
+     {
+      "word": "Now",
+      "start": 2.6,
+      "end": 2.66
+     },
+     {
+      "word": "pour",
+      "start": 2.66,
+      "end": 2.88
+     },
+     {
+      "word": "your",
+      "start": 2.88,
+      "end": 3.04
+     },
+     {
+      "word": "tea",
+      "start": 3.04,
+      "end": 3.28
+     },
+     {
+      "word": "and",
+      "start": 3.28,
+      "end": 3.54
+     },
+     {
+      "word": "begin.",
+      "start": 3.54,
+      "end": 3.82
+     }
+    ]
+   },
+   "r3Cut": {
+    "fromFrame": 0,
+    "toFrame": 97,
+    "speechStart": 0.02
+   }
+  }
+ ],
+ "run6": {
+  "transcript": [
+   {
+    "text": "Is",
+    "start": 0.0,
+    "end": 0.24
+   },
+   {
+    "text": "your",
+    "start": 0.24,
+    "end": 0.42
+   },
+   {
+    "text": "plate",
+    "start": 0.42,
+    "end": 0.62
+   },
+   {
+    "text": "full?",
+    "start": 0.62,
+    "end": 0.94
+   },
+   {
+    "text": "Circle",
+    "start": 1.48,
+    "end": 1.66
+   },
+   {
+    "text": "one",
+    "start": 1.66,
+    "end": 1.9
+   },
+   {
+    "text": "thing,",
+    "start": 1.9,
+    "end": 2.22
+   },
+   {
+    "text": "then",
+    "start": 2.6,
+    "end": 2.7
+   },
+   {
+    "text": "try",
+    "start": 2.7,
+    "end": 2.94
+   },
+   {
+    "text": "these",
+    "start": 2.94,
+    "end": 3.18
+   },
+   {
+    "text": "three",
+    "start": 3.18,
+    "end": 3.42
+   },
+   {
+    "text": "hacks.",
+    "start": 3.42,
+    "end": 3.78
+   },
+   {
+    "text": "What",
+    "start": 4.06,
+    "end": 4.14
+   },
+   {
+    "text": "is",
+    "start": 4.14,
+    "end": 4.26
+   },
+   {
+    "text": "the",
+    "start": 4.26,
+    "end": 4.46
+   },
+   {
+    "text": "first",
+    "start": 4.46,
+    "end": 4.78
+   },
+   {
+    "text": "thing",
+    "start": 4.78,
+    "end": 5.18
+   },
+   {
+    "text": "to",
+    "start": 5.18,
+    "end": 5.74
+   },
+   {
+    "text": "move",
+    "start": 5.74,
+    "end": 5.92
+   },
+   {
+    "text": "off",
+    "start": 5.92,
+    "end": 6.12
+   },
+   {
+    "text": "the",
+    "start": 6.12,
+    "end": 6.3
+   },
+   {
+    "text": "table?",
+    "start": 6.3,
+    "end": 6.58
+   },
+   {
+    "text": "Your",
+    "start": 6.94,
+    "end": 7.08
+   },
+   {
+    "text": "phone.",
+    "start": 7.08,
+    "end": 7.4
+   },
+   {
+    "text": "Put",
+    "start": 8.18,
+    "end": 8.32
+   },
+   {
+    "text": "it",
+    "start": 8.32,
+    "end": 8.42
+   },
+   {
+    "text": "in",
+    "start": 8.42,
+    "end": 8.56
+   },
+   {
+    "text": "another",
+    "start": 8.56,
+    "end": 8.84
+   },
+   {
+    "text": "room,",
+    "start": 8.84,
+    "end": 9.22
+   },
+   {
+    "text": "out",
+    "start": 9.52,
+    "end": 9.72
+   },
+   {
+    "text": "of",
+    "start": 9.72,
+    "end": 9.9
+   },
+   {
+    "text": "reach.",
+    "start": 9.9,
+    "end": 10.16
+   },
+   {
+    "text": "Then",
+    "start": 10.54,
+    "end": 10.66
+   },
+   {
+    "text": "stay",
+    "start": 10.66,
+    "end": 10.92
+   },
+   {
+    "text": "fully",
+    "start": 10.92,
+    "end": 11.24
+   },
+   {
+    "text": "present",
+    "start": 11.24,
+    "end": 11.6
+   },
+   {
+    "text": "with",
+    "start": 11.6,
+    "end": 11.82
+   },
+   {
+    "text": "the",
+    "start": 11.82,
+    "end": 11.96
+   },
+   {
+    "text": "one",
+    "start": 11.96,
+    "end": 12.14
+   },
+   {
+    "text": "thing",
+    "start": 12.14,
+    "end": 12.32
+   },
+   {
+    "text": "in",
+    "start": 12.32,
+    "end": 12.5
+   },
+   {
+    "text": "front",
+    "start": 12.5,
+    "end": 12.62
+   },
+   {
+    "text": "of",
+    "start": 12.62,
+    "end": 12.76
+   },
+   {
+    "text": "you,",
+    "start": 12.76,
+    "end": 12.96
+   },
+   {
+    "text": "just",
+    "start": 13.42,
+    "end": 13.58
+   },
+   {
+    "text": "that",
+    "start": 13.58,
+    "end": 13.8
+   },
+   {
+    "text": "page.",
+    "start": 13.8,
+    "end": 14.16
+   },
+   {
+    "text": "Now",
+    "start": 14.56,
+    "end": 14.6
+   },
+   {
+    "text": "give",
+    "start": 14.6,
+    "end": 14.82
+   },
+   {
+    "text": "that",
+    "start": 14.82,
+    "end": 15.02
+   },
+   {
+    "text": "page",
+    "start": 15.02,
+    "end": 15.34
+   },
+   {
+    "text": "a",
+    "start": 15.34,
+    "end": 15.58
+   },
+   {
+    "text": "clear",
+    "start": 15.58,
+    "end": 15.74
+   },
+   {
+    "text": "start.",
+    "start": 15.74,
+    "end": 16.16
+   },
+   {
+    "text": "What",
+    "start": 16.54,
+    "end": 16.76
+   },
+   {
+    "text": "small",
+    "start": 16.76,
+    "end": 17.14
+   },
+   {
+    "text": "ritual",
+    "start": 17.14,
+    "end": 17.5
+   },
+   {
+    "text": "could",
+    "start": 17.5,
+    "end": 17.74
+   },
+   {
+    "text": "mark",
+    "start": 17.74,
+    "end": 18.0
+   },
+   {
+    "text": "it?",
+    "start": 18.0,
+    "end": 18.22
+   },
+   {
+    "text": "Pick",
+    "start": 18.42,
+    "end": 18.54
+   },
+   {
+    "text": "one",
+    "start": 18.54,
+    "end": 18.84
+   },
+   {
+    "text": "tiny",
+    "start": 18.84,
+    "end": 19.14
+   },
+   {
+    "text": "ritual,",
+    "start": 19.14,
+    "end": 19.58
+   },
+   {
+    "text": "like",
+    "start": 19.76,
+    "end": 19.98
+   },
+   {
+    "text": "pouring",
+    "start": 19.98,
+    "end": 20.26
+   },
+   {
+    "text": "tea,",
+    "start": 20.26,
+    "end": 20.6
+   },
+   {
+    "text": "and",
+    "start": 20.9,
+    "end": 21.06
+   },
+   {
+    "text": "do",
+    "start": 21.06,
+    "end": 21.18
+   },
+   {
+    "text": "it",
+    "start": 21.18,
+    "end": 21.36
+   },
+   {
+    "text": "every",
+    "start": 21.36,
+    "end": 21.58
+   },
+   {
+    "text": "time",
+    "start": 21.58,
+    "end": 21.8
+   },
+   {
+    "text": "you",
+    "start": 21.8,
+    "end": 21.94
+   },
+   {
+    "text": "start.",
+    "start": 21.94,
+    "end": 22.26
+   },
+   {
+    "text": "Phone",
+    "start": 22.48,
+    "end": 22.54
+   },
+   {
+    "text": "away,",
+    "start": 22.54,
+    "end": 22.82
+   },
+   {
+    "text": "one",
+    "start": 23.08,
+    "end": 23.32
+   },
+   {
+    "text": "thing,",
+    "start": 23.32,
+    "end": 23.6
+   },
+   {
+    "text": "same",
+    "start": 23.92,
+    "end": 24.08
+   },
+   {
+    "text": "ritual.",
+    "start": 24.08,
+    "end": 24.48
+   },
+   {
+    "text": "Now",
+    "start": 24.94,
+    "end": 25.04
+   },
+   {
+    "text": "pour",
+    "start": 25.04,
+    "end": 25.28
+   },
+   {
+    "text": "your",
+    "start": 25.28,
+    "end": 25.46
+   },
+   {
+    "text": "tea",
+    "start": 25.46,
+    "end": 25.7
+   },
+   {
+    "text": "and",
+    "start": 25.7,
+    "end": 25.96
+   },
+   {
+    "text": "begin.",
+    "start": 25.96,
+    "end": 26.24
+   }
+  ],
+  "graphics": [
+   {
+    "id": "g1-l1",
+    "treatment": "photo_panel",
+    "cue": {
+     "lineId": "l1",
+     "from": 2,
+     "to": 3,
+     "words": "plate full?"
+    },
+    "holdSec": 2.5,
+    "layout": "photo_panel",
+    "subject": "a notepad page headed TO DO, with a couple of items and the other lines crammed with scribble, showing a full plate; handwritten on the notepad: the heading \"TO DO\", the lines \"emails\" and \"calls\", and the rest of its lines scribbled",
+    "writing": [
+     {
+      "assetId": "still-notepad",
+      "text": "TO DO",
+      "lines": [
+       "emails",
+       "calls"
+      ],
+      "scribble": true
+     }
+    ],
+    "assets": [
+     {
+      "id": "still-notepad",
+      "type": "still",
+      "providerJobId": "4ffbd235-c5ca-464e-854c-6e8e21cfd94b",
+      "storagePath": "remake-film3-20261108/project-r3/assets/gen/notepad-c.png",
+      "sha256": "0586115b5c18b2e597286a5f4f913d044eef20b39d96733da8a48dc2a674e351",
+      "width": 744,
+      "height": 1000,
+      "meta": {
+       "writing": {
+        "x": 145.02,
+        "y": 107.19,
+        "size": 107.19,
+        "maxChars": 10,
+        "rules": {
+         "firstY": 164,
+         "pitch": 44.6,
+         "fromRule": 3,
+         "left": 148.17,
+         "right": 472.88,
+         "rightSpread": 226.98,
+         "bottom": 945.76
+        },
+        "lines": {
+         "size": 84,
+         "every": 2,
+         "max": 4,
+         "maxChars": 14
+        }
+       }
+      }
+     }
+    ]
+   },
+   {
+    "id": "g2-l3",
+    "treatment": "top_band_broll",
+    "cue": {
+     "lineId": "l3",
+     "from": 0,
+     "to": 1,
+     "words": "Your phone."
+    },
+    "holdSec": 2,
+    "layout": "top_band",
+    "subject": "a hand setting a phone face-down on a hallway shelf outside the kitchen",
+    "assets": [
+     {
+      "id": "broll-l3-phone",
+      "type": "broll",
+      "providerJobId": "1aab8b5f-13a6-45db-a480-a5bc1f89edb7",
+      "storagePath": "remake-film3-20261108/raw/broll-l3-phone-raw.mp4",
+      "sha256": "87a07b2a54ef45d484fb24988cd17bfdff9de585e071e8928b81cd1c2bb10458",
+      "width": 480,
+      "height": 854,
+      "meta": {
+       "mediaStart": 0.5,
+       "mediaEnd": 4.041667,
+       "frame": [
+        1080,
+        1918
+       ],
+       "pan": [
+        {
+         "at": 0,
+         "y": 0
+        },
+        {
+         "at": 0.3,
+         "y": -380,
+         "ease": "sine.inOut"
+        },
+        {
+         "at": 0.7,
+         "y": -640,
+         "ease": "sine.inOut"
+        },
+        {
+         "at": 1.1,
+         "y": -755,
+         "ease": "sine.inOut"
+        },
+        {
+         "at": 1.5,
+         "y": -800,
+         "ease": "sine.out"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "g3-l6",
+    "treatment": "top_band_broll",
+    "cue": {
+     "lineId": "l6",
+     "from": 5,
+     "to": 6,
+     "words": "pouring tea,"
+    },
+    "holdSec": 2,
+    "layout": "top_band",
+    "subject": "amber tea pouring from a teapot into a mug",
+    "assets": [
+     {
+      "id": "broll-l6-tea",
+      "type": "broll",
+      "providerJobId": "db446702-b676-4ac3-887b-c700bf44ae52",
+      "storagePath": "remake-film3-20261108/raw/broll-l6-tea-raw.mp4",
+      "sha256": "905799adb4be89fd6c0faa8091f77745f8eebe9c8e2a563ad6bf207aca5d58de",
+      "width": 480,
+      "height": 854,
+      "meta": {
+       "mediaStart": 1.5,
+       "mediaEnd": 4.041667,
+       "frame": [
+        1080,
+        1918
+       ],
+       "crop": [
+        0,
+        550,
+        1080,
+        1918
+       ],
+       "anchor": [
+        0.5,
+        0.17
+       ],
+       "zoom": [
+        1.06,
+        1
+       ]
+      }
+     }
+    ]
+   }
+  ],
+  "persistent": [
+   {
+    "id": "p-counter",
+    "treatment": "step_counter",
+    "layout": "overlay",
+    "untilLineEnd": "l6",
+    "subject": "the lesson's step counter, 1/3 to 3/3",
+    "updates": [
+     {
+      "cue": {
+       "lineId": "l3",
+       "from": 2,
+       "to": 4,
+       "words": "Put it in"
+      },
+      "text": "1/3"
+     },
+     {
+      "cue": {
+       "lineId": "l4",
+       "from": 0,
+       "to": 3,
+       "words": "Then stay fully present"
+      },
+      "text": "2/3"
+     },
+     {
+      "cue": {
+       "lineId": "l6",
+       "from": 0,
+       "to": 3,
+       "words": "Pick one tiny ritual,"
+      },
+      "text": "3/3"
+     }
+    ]
+   }
+  ],
+  "resolved": [
+   {
+    "id": "g1-l1",
+    "startFrame": 11,
+    "frames": 60
+   },
+   {
+    "id": "g2-l3",
+    "startFrame": 167,
+    "frames": 48
+   },
+   {
+    "id": "g3-l6",
+    "startFrame": 480,
+    "frames": 48
+   },
+   {
+    "id": "p-counter",
+    "startFrame": 197,
+    "frames": 341,
+    "updates": [
+     [
+      "1/3",
+      197
+     ],
+     [
+      "2/3",
+      254
+     ],
+     [
+      "3/3",
+      443
+     ]
+    ]
+   }
+  ]
+ }
+}

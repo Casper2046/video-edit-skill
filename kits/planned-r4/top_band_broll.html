@@ -1,0 +1,36 @@
+<!--
+  top band b-roll (kit film3-r3.2): r3's shelf/tea/pen bands. A b-roll clip fills a band across the top of the frame (preset
+  height 555, or the clip's meta bandHeightPx) while the main timeline slides the take down under it (presenter shift).
+  The clip is scaled to its meta `frame` (r3: 1080x1918), its `crop` rows kept, placed at its `anchor` inside the band, and
+  moved by its `pan` keyframes (r3's shelf tilts down with the phone) or eased from its `zoom` (r3's tea and pen); it plays
+  from its trim in (`mediaStart`). The band enters from y -400 (its first frame already shows) and, when it ends before its
+  take's cut, leaves upwards and is hidden just before the host's end; otherwise it ends with the cut.
+  Parameters (render_planned.py): id, src, band_h, the clip box, media_start, motion, exit, hold.
+-->
+<template>
+  <div id="root" data-composition-id="__ID__" data-width="1080" data-height="1920">
+    <style>
+      #root { position: absolute; inset: 0; pointer-events: none; }
+      #__ID__-band {
+        position: absolute; left: 0; top: 0; width: 1080px; height: __BAND_H__px; overflow: hidden; background: #2a2018;
+        border-bottom: 6px solid var(--color-paper, #fbf6ec); box-shadow: 0 14px 30px rgba(30, 18, 8, 0.38); opacity: 0;
+      }
+      #__ID__-box { position: absolute; left: 0; top: 0; width: 1080px; height: __BAND_H__px; overflow: hidden; }
+      #__ID__-vid { position: absolute; left: __VID_L__px; top: __VID_T__px; width: __VID_W__px; height: __VID_H__px; object-fit: fill; }
+    </style>
+    <div id="__ID__-band" data-layout-allow-overflow>
+      <div id="__ID__-box" data-layout-allow-overflow>
+        <video id="__ID__-vid" class="clip" src="__SRC__" data-start="0" data-duration="__HOLD__" data-media-start="__MEDIA_START__" data-track-index="0" muted playsinline></video>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var tl = gsap.timeline({ paused: true });
+        tl.set("#__ID__-band", { opacity: 1 }, 0);
+        tl.fromTo("#__ID__-band", { y: __FROM_Y__ }, { y: 0, duration: __ENTER__, ease: "power3.out" }, 0);
+__MOTION____EXIT__        tl.set({}, {}, __HOLD__);
+        window.__timelines["__ID__"] = tl;
+      })();
+    </script>
+  </div>
+</template>

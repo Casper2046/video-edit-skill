@@ -21,6 +21,11 @@ L2 = 'What is the first thing to move off the table?'
 L3 = 'Your phone. Put it in another room, out of reach.'
 L4 = 'Then stay fully present with the one thing in front of you. Just that page.'
 KIT = P.load_kit()
+# film 3 as kit film3-r3.3 placed it and r3's captions page (kept in the repo; ticket 11 builds both from the packet)
+with open(os.path.join(ROOT, 'kits', 'film3-r3.3', 'kit.json'), encoding='utf-8') as _fh:
+    R33 = json.load(_fh)
+with open(os.path.join(ROOT, 'kits', 'film3-r3.3', 'captions.html'), encoding='utf-8') as _fh:
+    R33_CAPTIONS = _fh.read()
 
 
 def g(cue, gid='g-x', hold=2.2, **kw):
@@ -246,7 +251,7 @@ FILM3 = [('l1', 'Is your plate full? Circle one thing, then try these three hack
          ('l5', 'Now give that page a clear start. What small ritual could mark it?'),
          ('l6', 'Pick one tiny ritual, like pouring tea, and do it every time you start.'),
          ('l7', 'Phone away, one thing, same ritual. Now pour your tea and begin.')]
-FILM3_PLACE = {k: {'start': v['start'], 'duration': v['duration']} for k, v in KIT['takes'].items()}
+FILM3_PLACE = {k: {'start': v['start'], 'duration': v['duration']} for k, v in R33['takes'].items()}
 
 
 def film3_packet(*graphics):
@@ -256,7 +261,7 @@ def film3_packet(*graphics):
 
 def film3_heard(**onsets):
     """a render transcript of film 3: each word where the kit's captions show it, except the onsets given (word text: s)"""
-    caps = P.caption_words(KIT)
+    caps = P.caption_words(R33_CAPTIONS)
     return [{'text': w, 'start': onsets.get(w, t), 'end': onsets.get(w, t) + .1} for w, t in caps]
 
 
@@ -264,7 +269,7 @@ class CaptionEntry(unittest.TestCase):
     """lead 10 Nov: a graphic enters on the first frame at or after its cue word's onset, the frame the caption switches
     to that word; never on a frame whose caption still shows the previous word"""
     def test_the_kits_captions_are_film_3s_86_words_in_order(self):
-        caps = P.caption_words(KIT)
+        caps = P.caption_words(R33_CAPTIONS)
         self.assertEqual([w for w, _ in caps], ' '.join(t for _, t in FILM3).split())
         self.assertEqual(dict(caps[78:80]), {'same': 23.977, 'ritual.': 24.077})
 
@@ -272,7 +277,7 @@ class CaptionEntry(unittest.TestCase):
         """r3-hand run: medium.en heard "ritual." at 24.08 s; the pen entered on frame 577 (24.042 s), its caption still "same"."""
         pk = film3_packet(g({'lineId': 'l7', 'from': 5, 'to': 5, 'words': 'ritual.'}, 'g-pen', 2.0, treatment='top_band_broll',
                             layout='top_band', holdUntilLineEnd=True))
-        caps = P.caption_frames(KIT)
+        caps = P.caption_frames(R33_CAPTIONS, 24)
         (r,) = P.resolve(pk, film3_heard(**{'same': 23.92, 'ritual.': 24.08}), FILM3_PLACE, 24, caps)
         self.assertEqual(r['startFrame'], 578)
         self.assertEqual(P.caption_at(caps, r['startFrame']), 'ritual.')
@@ -282,13 +287,13 @@ class CaptionEntry(unittest.TestCase):
         """2/3 on "present": heard at 11.24 s (frame 269.8 -> 270), its caption at 11.253 s (frame 271)"""
         pk = film3_packet(g({'lineId': 'l4', 'from': 3, 'to': 3, 'words': 'present'}, 'g-present', 1.5, treatment='circle',
                             layout='overlay', target='x'))
-        caps = P.caption_frames(KIT)
+        caps = P.caption_frames(R33_CAPTIONS, 24)
         (r,) = P.resolve(pk, film3_heard(present=11.24), FILM3_PLACE, 24, caps)
         self.assertEqual(r['startFrame'], 271)
         self.assertEqual(P.caption_at(caps, 270), 'fully')
 
     def test_a_graphic_first_seen_while_the_caption_shows_the_previous_word_fails(self):
-        caps = P.caption_frames(KIT)
+        caps = P.caption_frames(R33_CAPTIONS, 24)
         r = {'id': 'g-pen', 'treatment': 'top_band_broll', 'lineId': 'l7', 'from': 5, 'to': 5, 'words': 'ritual.', 'onset': 24.08,
              'startFrame': 578, 'frames': 57, 'holdSec': 2.0, 'textWords': 0, 'captionIndex': 79}
         _, failures = P.timing_table([r], {'g-pen': m(range(577, 635))}, 24, caps)
@@ -430,8 +435,9 @@ class Build(unittest.TestCase):
                 files[ln['take']['sha256']] = os.path.join(d, ln['id'] + '.mp4')
                 with open(files[ln['take']['sha256']], 'wb') as fh:
                     fh.write(b'x')
-            kit = {**KIT, 'takes': {k: {**v, 'mediaStart': 0} for k, v in PLACE.items()}, 'duration': 12.0}
-            P.build(pk, files, resolved, kit, os.path.join(d, 'proj'), os.path.join(d, 'masks'))
+            place = {k: {**v, 'mediaStart': 0, 'startFrame': round(v['start'] * 24), 'frames': round(v['duration'] * 24)}
+                     for k, v in PLACE.items()}
+            P.build(pk, files, resolved, KIT, os.path.join(d, 'proj'), os.path.join(d, 'masks'), place, R33_CAPTIONS)
             with open(os.path.join(d, 'proj', 'index.html')) as fh:
                 self.assertEqual(fh.read().count('data-composition-id="p-counter"'), 1)
             with open(os.path.join(d, 'proj', 'compositions', 'p-counter.html')) as fh:
@@ -656,9 +662,9 @@ class Handwriting(unittest.TestCase):
             P.check_packet(pk, KIT)
         return str(e.exception)
 
-    def test_the_kit_is_film3_r3_3(self):
-        self.assertEqual(P.PIN['kit'], 'film3-r3.3')
-        self.assertEqual(KIT['kit'], 'film3-r3.3')
+    def test_the_kit_is_planned_r4(self):
+        self.assertEqual(P.PIN['kit'], 'planned-r4')
+        self.assertEqual(KIT['kit'], 'planned-r4')
 
     def test_a_heading_lines_and_a_sticky_line_are_accepted_and_every_word_counts_for_the_text_rule(self):
         pk = self.panel({'assetId': 'still-notepad', 'text': 'Today', 'lines': ['Call mom', 'Gym 6pm'], 'scribble': True},

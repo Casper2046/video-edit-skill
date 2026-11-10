@@ -1,0 +1,33 @@
+<!--
+  captions (kit planned-r4): r3's captions (V2's style and rules, remake-film3-20261108/verify/gencap.py) for any episode:
+  word-timed groups of 1-3 words, the accent colour on a group's key word. Built by render_planned.py from each take's words
+  (the first word at the take's measured speech start) placed through its cut, and the line's caption groups ("|" splits
+  groups, "*" marks an accent; without them: a break after punctuation or every three words, no accent). Band: as V2,
+  group box y 1068-1198, max text width 820 px. Parameters: groups, timeline, end.
+-->
+<template>
+  <div id="root" data-composition-id="captions" data-width="1080" data-height="1920">
+    <style>
+      #root { position: absolute; inset: 0; pointer-events: none; }
+      .cg {
+        position: absolute; left: 0; top: 1068px; width: 1080px; height: 130px;
+        display: block; line-height: 130px;
+        font-family: "Poppins", sans-serif; font-weight: 800; letter-spacing: -0.01em;
+        color: #fff; text-align: center; white-space: nowrap; overflow: visible;
+        opacity: 0; visibility: hidden;
+        text-shadow: 0 3px 0 rgba(30, 20, 12, 0.55), 0 6px 22px rgba(0, 0, 0, 0.55);
+      }
+      .cw { display: inline-block; margin: 0 0.2em; opacity: 0; transform-origin: 50% 70%; }
+      .cw.acc { color: var(--color-accent, #ffc23d); }
+    </style>
+__GROUPS__
+    <script>
+    (function () {
+    var tl = gsap.timeline({ paused: true });
+__TIMELINE__
+    tl.set({}, {}, __END__);
+    window.__timelines["captions"] = tl;
+    })();
+    </script>
+  </div>
+</template>
