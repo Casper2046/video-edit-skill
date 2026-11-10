@@ -6,6 +6,7 @@
 !SKILL.md
 !scripts/
 !looks/
+!kits/
 !assets/
 !docker/requirements.lock
 !docker/image_assets.py

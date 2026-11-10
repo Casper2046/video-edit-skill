@@ -146,6 +146,13 @@ PY SK/scripts/render_packet.py <packet.json> --shots <dir> --out <dir> [--look b
     line, with a Python traceback, or the render's output when a render fails (a signal is 3 too). No retry.
 - Film: `<out>/renders/<slug>-<look>-<platform>.mp4`, 1080x1920, with its `-qa.json`, sheets and page copy beside it.
 
+Planned mode (a packet with `graphics`, SPEC v1.3): `render_packet.py` hands it to `render_planned.py`. `--shots` holds the
+takes and pictures, each matched by sha256. Every graphic's cue (line id + word index range) is checked against its line and
+resolved on the render transcript; a missing or ambiguous cue, or a hold past its take, refuses (exit 2) naming the graphic id.
+The film is built from the pinned kit (`kits/<kit>/`, HyperFrames 0.9.23, GSAP 3.15.0, 24 fps) and `<out>/evidence/` gets the
+resolved timeline, the timing table (each graphic's measured first/last frame against its rule), the frame-per-word sheet and
+the cue-frame sheet.
+
 Checks measured on the render: the `render` stage renders the page twice, the film and then an overlays-only copy
 (`work/overlays.html`: no video or audio, captions tagged one colour, text shadows another) as an RGBA PNG sequence in
 `work/overlays/` (`overlay_mask.py`). Its alpha is the overlay mask: per frame, the boxes of every overlay pixel (ink),
@@ -163,10 +170,11 @@ the captions, and the text shadows. From it, on the film's own frames and audio:
 
 Environment: `VIDEO_EDIT_HYPERFRAMES` names an installed hyperframes binary (the render image sets it; otherwise a
 hyperframes on PATH at the pinned version, else `npx --yes hyperframes@0.8.34`); `VIDEO_EDIT_GSAP` names a local
-GSAP 3.14.2 (sha256-checked; otherwise the CDN).
+GSAP 3.14.2 (sha256-checked; otherwise the CDN). Planned mode: `VIDEO_EDIT_HYPERFRAMES_PLANNED` names a hyperframes 0.9.23
+binary (otherwise `npx --yes hyperframes@0.9.23`, which needs network) and `VIDEO_EDIT_GSAP_PLANNED` a local GSAP 3.15.0.
 
 Tests: `PY -m unittest discover -s SK/tests` (synthetic only, no network). `test_render_packet.py` (packet entry point
-and exit codes), `test_render_checks.py` (overlay mask, onset, presence, safe zone, face clearance, openings in the
+and exit codes), `test_render_planned.py` (planned mode: cues, refusals, timing table), `test_render_checks.py` (overlay mask, onset, presence, safe zone, face clearance, openings in the
 report), `test_openings.py` (unclean openings), `test_offline_image.py` (the image's offline wiring), `test_spec_mode.py`
 and `test_platform.py`. Two suites also run against private labelled footage when pointed at it, and skip otherwise:
 `VIDEO_EDIT_ONSET_FIXTURES` (a folder of `cN.wav` + `labels.json` with speech-onset labels) and

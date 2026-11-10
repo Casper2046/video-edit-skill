@@ -1,0 +1,42 @@
+<!--
+  photo panel (kit film3-r3): r3's plate.html panel (warm card, grain, drop shadow; preset box x 800-1062, y 570-1040, clear
+  of take 1's face and above the caption band at 1068) holding one still, fitted by its aspect and tilted -3deg. Slides in
+  from the right with its first frame already on screen (part of the card at x >= 1000), holds, slides out to the right
+  and is gone by the host's end. Parameters (render_planned.py): __ID__, __SRC__, __HOLD__, __EXIT_AT__, the box and the
+  image fit.
+-->
+<template>
+  <div id="root" data-composition-id="__ID__" data-width="1080" data-height="1920">
+    <style>
+      #root { position: absolute; inset: 0; pointer-events: none; }
+      #__ID__-panel {
+        position: absolute; left: __LEFT__px; top: __TOP__px; width: __W__px; height: __H__px;
+        border-radius: 18px; overflow: hidden;
+        background: linear-gradient(180deg, #ecdcc0 0%, #e2cba6 70%, #d8bd94 100%);
+        box-shadow: 0 16px 30px rgba(30, 18, 8, 0.45), 0 2px 4px rgba(30, 18, 8, 0.3);
+      }
+      #__ID__-grain { position: absolute; left: 0; top: 0; width: __W__px; height: __H__px; opacity: 0.22; mix-blend-mode: multiply; }
+      #__ID__-img {
+        position: absolute; left: __IMG_L__px; top: __IMG_T__px; width: __IMG_W__px; height: __IMG_H__px;
+        transform: rotate(-3deg);
+        filter: drop-shadow(0 10px 10px rgba(60, 36, 14, 0.38)) drop-shadow(0 2px 2px rgba(60, 36, 14, 0.35));
+      }
+    </style>
+    <div id="__ID__-panel" data-layout-allow-overflow>
+      <svg id="__ID__-grain" viewBox="0 0 __W__ __H__" data-layout-ignore>
+        <filter id="__ID__-noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" /><feColorMatrix type="saturate" values="0" /></filter>
+        <rect width="__W__" height="__H__" filter="url(#__ID__-noise)" />
+      </svg>
+      <img id="__ID__-img" src="__SRC__" alt="" />
+    </div>
+    <script>
+      (function () {
+        var tl = gsap.timeline({ paused: true });
+        tl.fromTo("#__ID__-panel", { x: 200, rotation: 4 }, { x: 0, rotation: 0, duration: __ENTER__, ease: "power3.out" }, 0);
+        tl.to("#__ID__-panel", { x: 320, rotation: 4, duration: __EXIT__, ease: "power3.in" }, __EXIT_AT__);
+        tl.set({}, {}, __HOLD__);
+        window.__timelines["__ID__"] = tl;
+      })();
+    </script>
+  </div>
+</template>

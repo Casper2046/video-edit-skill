@@ -2,6 +2,7 @@
 """The caller's edit packet in, finished reel out: writes a reel spec and an expected-text file, then runs make_reel.py.
 
 Usage:  PY render_packet.py <packet.json> --shots DIR --out DIR [--look bold] [--platform reels] [--from STAGE] [--to STAGE]
+A planned packet (one with `graphics`, SPEC v1.3) goes to render_planned.py instead; the rest of this note is spec mode.
 The packet: {shots: [{narration}], provenance: {episodeId, productionId, ..., shots:
 [{operationId, sha256, narration, url, ...}]}}. Each shot is the file in --shots whose sha256 is provenance.shots[i].sha256;
 url is never fetched. A missing, ambiguous or mismatched shot, one that matches but cannot be decoded, an unreadable
@@ -125,12 +126,24 @@ def convert(packet_path, shots_dir, out, look, platform):
     return spec_path, text_path
 
 
+def planned(packet_path):
+    """True when the packet carries a plan (graphics); anything unreadable stays with the spec-mode path, which refuses it"""
+    try:
+        with open(packet_path, encoding='utf-8') as fh:
+            return 'graphics' in json.load(fh)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def main():
     skillenv.utf8_stdio()
     if len(sys.argv) < 2 or '--shots' not in sys.argv or '--out' not in sys.argv:
         print(__doc__, file=sys.stderr)
         sys.exit(2)
     out = os.path.abspath(skillenv.path_arg(arg('--out')))
+    if planned(skillenv.path_arg(sys.argv[1])):          # a planned packet (SPEC v1.3): the kit renders it
+        import render_planned
+        sys.exit(render_planned.main(skillenv.path_arg(sys.argv[1]), skillenv.path_arg(arg('--shots')), out))
     try:
         spec_path, text_path = convert(skillenv.path_arg(sys.argv[1]), skillenv.path_arg(arg('--shots')), out,
                                        arg('--look', 'bold'), arg('--platform', 'reels'))
