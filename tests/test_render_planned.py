@@ -109,6 +109,34 @@ PLACE = {'l2': {'start': 0.0, 'duration': 4.0}, 'l3': {'start': 4.0, 'duration':
 BAND = {'mediaStart': 0.5, 'mediaEnd': 4.041667, 'frame': [1080, 1918], 'bandHeightPx': 555}
 
 
+
+class StationaryDissolve(unittest.TestCase):
+    def test_new_band_is_stationary_and_keeps_the_complete_artwork(self):
+        cue = {'lineId':'l3', 'words':'phone'}
+        asset = {**still('source'), 'type':'broll', 'meta':{'mediaStart':0, 'mediaEnd':5, 'frame':[720,370],
+                                                            'bandHeightPx':312, 'bandTransition':'dissolve'}}
+        graphic = g(cue, 'g-band', treatment='top_band_broll', layout='top_band', assets=[asset])
+        resolved = {'id':'g-band','lineId':'l3','treatment':'top_band_broll','startFrame':100,'frames':50,'cutFrame':150}
+        P.check_packet(packet(graphic), KIT)
+        piece = P.top_band_piece(KIT, resolved, graphic, ['assets/gen/source.mp4'], 24)
+        self.assertIn('object-fit: contain', piece)
+        self.assertRegex(piece, r'width: 607\.14px; height: 312(?:\.0)?px')
+        self.assertNotIn(' y:', piece)
+        self.assertIn('opacity:0, duration:0.041667', piece)
+        # The source transform remains stationary through both joins, even for packets with an old shift.
+        self.assertEqual(P.presenter_tweens(KIT,resolved,{'meta':{'topBandShiftPx':252}},24,asset['meta']), '')
+        self.assertIn('{ y: 252, duration:',P.presenter_tweens(KIT,resolved,{'meta':{'topBandShiftPx':252}},24))
+        self.assertEqual(P.GATES['top_band_broll']['checks'], ['face clearance','visible on the film'])
+
+    def test_new_band_refuses_missing_or_unreadable_height(self):
+        for height in (None, 0, 239, 556, True, 310.5):
+            asset={**still(), 'type':'broll', 'meta':{'mediaStart':0, 'mediaEnd':4, 'frame':[720,370],
+                                                  'bandHeightPx':height,'bandTransition':'dissolve'}}
+            graphic=g({'lineId':'l3','words':'phone'},treatment='top_band_broll',layout='top_band',assets=[asset])
+            with self.subTest(height=height), self.assertRaisesRegex(P.Refused,'measured band height'):
+                P.check_packet(packet(graphic),KIT)
+
+
 class Checks(unittest.TestCase):
     """contract C: only the kit's pieces on their layouts; a malformed graphic refuses naming itself"""
     def refused(self, pk):

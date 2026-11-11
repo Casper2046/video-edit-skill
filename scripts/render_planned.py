@@ -319,6 +319,14 @@ def check_pictures(gr, line, spec, kit):
         meta = assets[0].get('meta') or {}
         if not all(isinstance(meta.get(k), (int, float)) for k in ('mediaStart', 'mediaEnd')) or len(meta.get('frame') or []) != 2:
             raise Refused(f"{gid}: b-roll {assets[0]['id']} has no trim (meta.mediaStart, meta.mediaEnd) or frame")
+        if 'bandTransition' in meta:
+            if meta['bandTransition'] != 'dissolve':
+                raise Refused(f"{gid}: unknown band transition")
+            height = meta.get('bandHeightPx')
+            if type(height) is not int or not 240 <= height <= 555:
+                raise Refused(f"{gid}: a stationary dissolve needs a measured band height between 240 and 555 px")
+            if any(type(n) not in (int, float) or not math.isfinite(n) or n <= 0 for n in meta['frame']):
+                raise Refused(f"{gid}: the dissolve source needs positive frame dimensions")
     if treatment == 'photo_panel':
         for a in assets:
             require(a, f"{gid}: picture {a['id']}", width=(int, float), height=(int, float))
@@ -997,6 +1005,15 @@ def top_band_piece(kit, r, gr, rels, fps):
     m = a['meta']
     band = m.get('bandHeightPx', pre['bandHeightPx'])
     fw, fh = m['frame']
+    if m.get('bandTransition') == 'dissolve':
+        # Keep all the source pixels inside its measured headroom; the take itself never translates.
+        scale = min(1080 / fw, band / fh)
+        w, h = round(fw * scale, 2), round(fh * scale, 2)
+        hold = r['frames'] / fps
+        return fill(kit_file(kit, 'top_band_dissolve.html'), {
+            '__ID__': gid, '__SRC__': rels[0], '__LEFT__': num((1080 - w) / 2), '__W__': num(w), '__H__': num(h),
+            '__HOLD__': num(hold), '__MEDIA_START__': num(m['mediaStart']), '__FRAME__': num(1 / fps),
+            '__LAST__': num(hold - 1 / fps), '__LEAVE__': num(hold - 1 / fps - .23)})
     cx0, cy0, cx1, cy1 = m.get('crop') or [0, 0, fw, fh]
     ax, ay = m.get('anchor') or [0.5, 0]
     s = max(1080 / (cx1 - cx0), band / (cy1 - cy0))           # the kept crop covers the band
@@ -1045,8 +1062,10 @@ def counter_piece(kit, r, fps):
                                                    '__END__': f"{r['frames'] / fps:.6f}"})
 
 
-def presenter_tweens(kit, r, take, fps):
+def presenter_tweens(kit, r, take, fps, band_meta=None):
     """the top band's presenter transform: the take slides down under the band, and back up if the band leaves first"""
+    if (band_meta or {}).get('bandTransition') == 'dissolve':
+        return ''
     pre = kit['presets']['top_band']
     pr, d = pre['presenter'], (take.get('meta') or {}).get('topBandShiftPx', pre['presenter']['shiftPx'])
     start, w = r['startFrame'] / fps - EPS, f"#w-{r['lineId']}"
@@ -1096,7 +1115,7 @@ def build(pk, files, resolved, kit, proj, masks, place, captions):
         hosts[gid] = host(gid, f'compositions/{gid}.html', r['startFrame'], r['frames'], fps, spec['track'], z=spec['z'])
         needs[gid] = [f'compositions/{gid}.html', *rels]
         if t == 'top_band_broll':
-            main += presenter_tweens(kit, r, take, fps)
+            main += presenter_tweens(kit, r, take, fps, gr['assets'][0]['meta'])
     head = HEAD.replace('__DUR__', str(dur)).replace('__FPS__', str(fps))
     caption_host = host('captions', 'compositions/captions.html', 0, round(dur * fps), fps, 5, 'captions', 20)
     with open(os.path.join(proj, 'index.html'), 'w', encoding='utf-8') as fh:
